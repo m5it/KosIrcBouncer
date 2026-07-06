@@ -6,15 +6,16 @@ A complete IRC bouncer with client-server architecture. Connect your IRC client 
 
 - **Multi-Network Support**: Connect to multiple IRC networks simultaneously (Libera, EFnet, OFTC, etc.)
 - **Persistent Connections**: Bot stays connected when you disconnect
+## Features
+
+- **Multi-Network Support**: Connect to multiple IRC networks simultaneously (Libera, EFnet, OFTC, etc.)
+- **IPv6 Support**: Full dual-stack IPv4/IPv6 support for connecting to modern IRC networks
+- **Persistent Connections**: Bot stays connected when you disconnect
 - **Message Buffering**: Full playback of missed messages when you reconnect
 - **Web Dashboard**: Real-time monitoring and web-based IRC client
 - **SSL/TLS Support**: Encrypted connections to IRC and BNC
 - **Authentication**: Secure user management with hashed passwords
 - **Admin Commands**: Full control via `/BNC` commands
-
-## Architecture
-
-```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │   HexChat   │────▶│  BNC Server │────▶│ IRC Network │
 │  (Client)   │◀────│   (:6667)   │◀────│  (Libera)   │
@@ -36,17 +37,39 @@ git clone https://github.com/yourusername/irc-bnc.git
 cd irc-bnc
 
 # Install dependencies
-pip install -r requirements.txt
-
-# Run BNC
-python -m irc_bnc.main
-```
-
-### Configuration
-
 Create `config.json`:
 
 ```json
+{
+  "bnc_server": {
+    "bind_host": "::",
+    "bind_port": 6667,
+    "ssl_cert": null,
+    "ssl_key": null,
+    "require_auth": true,
+    "ipv6_only": false
+  },
+  "networks": [
+    {
+      "name": "libera",
+      "host": "irc.libera.chat",
+      "port": 6697,
+      "ssl": true,
+      "nick": "MyBNCBot",
+      "channels": ["#general", "#random"]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "password_hash": "$salt$hash",
+      "is_admin": true
+    }
+  ]
+}
+```
+
+**Note:** The default `bind_host` is now `"::"` which enables dual-stack IPv4/IPv6 support. Use `"0.0.0.0"` for IPv4-only or set `ipv6_only: true` for IPv6-only mode.
 {
   "bnc_server": {
     "bind_host": "0.0.0.0",
@@ -104,22 +127,39 @@ Create `config.json`:
 | `/BNC LISTUSERS` | List users (admin) |
 
 ## Web Dashboard
+Update config:
+```json
+{
+  "bnc_server": {
+    "ssl_cert": "cert.pem",
+    "ssl_key": "key.pem"
+  }
+}
+```
 
-Access at `http://localhost:8080`
+## IPv6 Configuration
 
-Features:
-- Real-time connection status
-- Message buffer viewer
-- Network management
-- User monitoring
-- Web-based IRC client (WebSocket)
+The BNC now supports full IPv6 connectivity:
 
-## Docker Deployment
+### Server Bind Options
+- **`bind_host: "::"`** (default) - Dual-stack mode, accepts both IPv4 and IPv6 connections
+- **`bind_host: "0.0.0.0"`** - IPv4-only mode
+- **`bind_host: "::1"`** - IPv6 localhost only
+- **`ipv6_only: true`** - Force IPv6-only mode (disables IPv4-mapped addresses)
 
-```bash
-# Build image
-docker build -t irc-bnc .
+### Client Connection Behavior
+When connecting to IRC networks, the BNC automatically:
+1. Resolves both IPv4 and IPv6 addresses for the target server
+2. Attempts connections in order (IPv6 preferred on most systems)
+3. Falls back to IPv4 if IPv6 fails
+4. Reports the connection type in status/logs (IPv4 or IPv6)
 
+### Verify IPv6 Connection
+Use the `/BNC STATUS` command to see your connection details including the address family (IPv4/IPv6).
+
+## License
+
+MIT License - See LICENSE file
 # Run container
 docker run -d \
   -p 6667:6667 \

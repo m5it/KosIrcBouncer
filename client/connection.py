@@ -21,11 +21,11 @@ class IrcConnection:
         self.host = host
         self.port = port
         self.use_ssl = use_ssl
-        
         self.socket: Optional[socket.socket] = None
         self.connected: bool = False
         self.receiving: bool = False
         self.receive_thread: Optional[threading.Thread] = None
+        self._addr_family: Optional[int] = None
         
         self._callbacks: List[Callable[[str], None]] = []
         self._lock = threading.Lock()
@@ -38,33 +38,76 @@ class IrcConnection:
     def connect(self) -> bool:
         """Establish connection to IRC server."""
         try:
-            # Create socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(30)
+            # Get all possible addresses (IPv4 and IPv6)
+            addr_info = socket.getaddrinfo(
+                self.host, 
+                self.port, 
+                socket.AF_UNSPEC,  # Allow both IPv4 and IPv6
+                socket.SOCK_STREAM
+            )
             
-            # Wrap with SSL if enabled
-            if self.use_ssl:
-                context = ssl.create_default_context()
-                context.check_hostname = False
-                context.verify_mode = ssl.CERT_NONE
-                self.socket = context.wrap_socket(sock, server_hostname=self.host)
+            last_error = None
+            
+            # Try each address until one works
+            for addr in addr_info:
+                family, socktype, proto, canonname, sockaddr = addr
+                
+                sock = None
+                try:
+                    # Create socket with appropriate family
+                    sock = socket.socket(family, socktype, proto)
+                    sock.settimeout(30)
+                    
+                    # Enable dual-stack for IPv6 sockets (IPv4-mapped addresses)
+                    if family == socket.AF_INET6:
+                        try:
+                            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                        except (AttributeError, OSError):
+                            # Some systems don't support this, that's okay
+                            pass
+                    
+                    # Wrap with SSL if enabled
+                    if self.use_ssl:
+                        context = ssl.create_default_context()
+                        context.check_hostname = False
+                        context.verify_mode = ssl.CERT_NONE
+                        self.socket = context.wrap_socket(sock, server_hostname=self.host)
+                    else:
+                        self.socket = sock
+                    
+                    # Connect
+                    self.socket.connect(sockaddr)
+                    self.socket.settimeout(None)  # Non-blocking for select
+                    
+                    self.connected = True
+                    self.connect_time = datetime.now()
+                    
+                    # Start receive thread
+                    self.receiving = True
+                    self.receive_thread = threading.Thread(target=self._receive_loop)
+                    self.receive_thread.daemon = True
+                    self.receive_thread.start()
+                    
+                    # Store the address family for stats
+                    self._addr_family = family
+                    
+                    return True
+                    
+                except Exception as e:
+                    last_error = e
+                    if sock:
+                        try:
+                            sock.close()
+                        except:
+                            pass
+                    continue
+            
+            # If we get here, none of the addresses worked
+            if last_error:
+                print(f"[ERROR] Connection failed: {last_error}")
             else:
-                self.socket = sock
-            
-            # Connect
-            self.socket.connect((self.host, self.port))
-            self.socket.settimeout(None)  # Non-blocking for select
-            
-            self.connected = True
-            self.connect_time = datetime.now()
-            
-            # Start receive thread
-            self.receiving = True
-            self.receive_thread = threading.Thread(target=self._receive_loop)
-            self.receive_thread.daemon = True
-            self.receive_thread.start()
-            
-            return True
+                print(f"[ERROR] Connection failed: Could not connect to {self.host}:{self.port}")
+            return False
             
         except Exception as e:
             print(f"[ERROR] Connection failed: {e}")
@@ -160,11 +203,19 @@ class IrcConnection:
     
     def get_stats(self) -> dict:
         """Get connection statistics."""
+        # Determine address family string
+        addr_family_str = "unknown"
+        if self._addr_family == socket.AF_INET:
+            addr_family_str = "IPv4"
+        elif self._addr_family == socket.AF_INET6:
+            addr_family_str = "IPv6"
+        
         return {
             'connected': self.connected,
             'host': self.host,
             'port': self.port,
             'ssl': self.use_ssl,
+            'addr_family': addr_family_str,
             'bytes_sent': self.bytes_sent,
             'bytes_received': self.bytes_received,
             'connect_time': self.connect_time

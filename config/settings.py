@@ -25,17 +25,22 @@ class IrcNetworkConfig:
     auto_reconnect: bool = True
     reconnect_delay: int = 30
 
-
 @dataclass
 class BncServerConfig:
     """Configuration for the BNC server."""
-    bind_host: str = "0.0.0.0"
+    # Use "::" for dual-stack (IPv4 and IPv6) support
+    # Use "0.0.0.0" for IPv4 only
+    # Use specific IPv6 address like "::1" for localhost only
+    bind_host: str = "::"
     bind_port: int = 6667
     ssl_cert: Optional[str] = None
     ssl_key: Optional[str] = None
     max_users: int = 10
     require_auth: bool = True
     buffer_size: int = 500
+    # Set to True to disable IPv4 when using IPv6 (IPV6_V6ONLY)
+    # False enables dual-stack mode on most systems
+    ipv6_only: bool = False
 
 
 @dataclass

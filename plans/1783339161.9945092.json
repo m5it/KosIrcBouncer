@@ -1,0 +1,46 @@
+{
+  "id": "1783339161.9945092",
+  "title": "Add IPv6 Support to IRC Bouncer",
+  "instructions": "Add full IPv6 support to the IRC bouncer so it can connect to IPv6 IRC servers. This includes updating the socket creation to support dual-stack (IPv4/IPv6), using getaddrinfo for proper address resolution, and ensuring both IPv4 and IPv6 connections work seamlessly.",
+  "startTimestamp": 1783339161.9945126,
+  "endTimestamp": null,
+  "tasks": {
+    "1783339164.6129656": {
+      "id": "1783339164.6129656",
+      "status": "completed",
+      "instruction": "Modify the IrcConnection class in client/connection.py to replace the hardcoded AF_INET socket creation with socket.getaddrinfo(). This will allow the system to resolve both IPv4 and IPv6 addresses. The getaddrinfo call should pass the host, port, and use AF_UNSPEC to get all available address families. Then iterate through the results and try to connect to each address until one succeeds.",
+      "startTimestamp": 1783339177.719501,
+      "endTimestamp": null,
+      "log": [
+        {
+          "timestamp": 1783339177.7214468,
+          "text": "Build started"
+        }
+      ]
+    },
+    "1783339166.6028326": {
+      "id": "1783339166.6028326",
+      "status": "completed",
+      "instruction": "In the IrcConnection.connect() method, when creating the socket, check if the address family is AF_INET6. If so, create the socket with IPV6_V6ONLY set to 0 to allow dual-stack support on systems that support it. This ensures the socket can handle both IPv4 and IPv6 traffic if needed.",
+      "startTimestamp": null,
+      "endTimestamp": null,
+      "log": []
+    },
+    "1783339168.66733": {
+      "id": "1783339168.66733",
+      "status": "completed",
+      "instruction": "Modify the BncServerConfig class in config/settings.py to support IPv6 bind addresses. Update the bind_host default from \"0.0.0.0\" to support \"::\" (IPv6 any address) or \"::ffff:0.0.0.0\" (dual-stack). Also ensure the BNC server can accept connections on both IPv4 and IPv6 if configured.",
+      "startTimestamp": null,
+      "endTimestamp": null,
+      "log": []
+    },
+    "1783339170.4753275": {
+      "id": "1783339170.4753275",
+      "status": "completed",
+      "instruction": "Modify the get_stats() method in IrcConnection class to include the address family (IPv4 or IPv6) of the current connection. This helps with debugging and verifying that IPv6 connections are working correctly.",
+      "startTimestamp": null,
+      "endTimestamp": null,
+      "log": []
+    }
+  }
+}
