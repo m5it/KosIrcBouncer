@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IRC BNC Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            line-height: 1.6;
+        }
+        
+        .header {
+            background: #16213e;
+            padding: 1rem 2rem;
+            border-bottom: 2px solid #0f3460;
+        }
+        
+        .header h1 {
+            color: #e94560;
+            font-size: 1.5rem;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+        
+        .card {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 1.5rem;
+            border: 1px solid #0f3460;
+        }
+        
+        .card h3 {
+            color: #e94560;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+        }
+        
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #0f3460;
+        }
+        
+        .status-item:last-child {
+            border-bottom: none;
+        }
+        
+        .status-label {
+            color: #a0a0a0;
+        }
+        
+        .status-value {
+            color: #fff;
+            font-weight: 500;
+        }
+        
+        .status-value.online {
+            color: #00d9ff;
+        }
+        
+        .status-value.offline {
+            color: #e94560;
+        }
+        
+        .btn {
+            background: #e94560;
+            color: #fff;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+        }
+        
+        .btn:hover {
+            background: #ff6b6b;
+        }
+        
+        .network-list {
+            list-style: none;
+        }
+        
+        .network-item {
+            padding: 0.75rem;
+            background: #0f3460;
+            margin-bottom: 0.5rem;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .network-name {
+            font-weight: 500;
+        }
+        
+        .network-status {
+            font-size: 0.85rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+        }
+        
+        .network-status.connected {
+            background: #00d9ff;
+            color: #1a1a2e;
+        }
+        
+        .network-status.disconnected {
+            background: #e94560;
+            color: #fff;
+        }
+        
+        .logs {
+            background: #0a0a0a;
+            border-radius: 4px;
+            padding: 1rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .log-entry {
+            padding: 0.25rem 0;
+            border-bottom: 1px solid #1a1a2e;
+        }
+        
+        .log-time {
+            color: #00d9ff;
+        }
+        
+        .nav {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .nav a {
+            color: #a0a0a0;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        
+        .nav a:hover, .nav a.active {
+            color: #e94560;
+            background: #0f3460;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔌 IRC BNC Dashboard</h1>
+    </div>
+    
+    <div class="container">
+        <nav class="nav">
+            <a href="#" class="active">Overview</a>
+            <a href="#">Networks</a>
+            <a href="#">Buffers</a>
+            <a href="#">Users</a>
+            <a href="#">Settings</a>
+        </nav>
+        
+        <div class="grid">
+            <div class="card">
+                <h3>📊 BNC Status</h3>
+                <div class="status-item">
+                    <span class="status-label">Status</span>
+                    <span class="status-value online">Running</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Uptime</span>
+                    <span class="status-value" id="uptime">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Active Users</span>
+                    <span class="status-value" id="active-users">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Connected Networks</span>
+                    <span class="status-value" id="connected-nets">-</span>
+                </div>
+                <button class="btn" onclick="refreshStatus()">Refresh</button>
+            </div>
+            
+            <div class="card">
+                <h3>🌐 IRC Networks</h3>
+                <ul class="network-list" id="network-list">
+                    <li class="network-item">
+                        <span class="network-name">Loading...</span>
+                    </li>
+                </ul>
+                <button class="btn" onclick="refreshNetworks()">Refresh</button>
+            </div>
+            
+            <div class="card">
+                <h3>💬 Recent Activity</h3>
+                <div class="logs" id="logs">
+                    <div class="log-entry">
+                        <span class="log-time">--:--</span> Dashboard loaded
+                    </div>
+                </div>
+                <button class="btn" onclick="clearLogs()">Clear</button>
+            </div>
+            
+            <div class="card">
+                <h3>⚡ Quick Actions</h3>
+                <button class="btn" onclick="connectAll()">Connect All Networks</button>
+                <button class="btn" onclick="disconnectAll()">Disconnect All</button>
+                <button class="btn" onclick="jumpServer()">Jump Server</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        const socket = io();
+        
+        // Auto-refresh status
+        function refreshStatus() {
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('uptime').textContent = data.bnc?.uptime || '-';
+                    document.getElementById('active-users').textContent = data.bnc?.active_sessions || '0';
+                    document.getElementById('connected-nets').textContent = 
+                        Object.values(data.networks || {}).filter(n => n.connected).length;
+                });
+        }
+        
+        function refreshNetworks() {
+            fetch('/api/networks')
+                .then(r => r.json())
+                .then(data => {
+                    const list = document.getElementById('network-list');
+                    list.innerHTML = '';
+                    (data.networks || []).forEach(net => {
+                        const li = document.createElement('li');
+                        li.className = 'network-item';
+                        const statusClass = net.connected ? 'connected' : 'disconnected';
+                        const statusText = net.connected ? 'connected' : 'disconnected';
+                        li.innerHTML = `
+                            <span class="network-name">${net.name}</span>
+                            <span class="network-status ${statusClass}">${statusText}</span>
+                        `;
+                        list.appendChild(li);
+                    });
+                });
+        }
+        
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+        }
+        
+        function connectAll() {
+            addLog('Connecting all networks...');
+        }
+        
+        function disconnectAll() {
+            addLog('Disconnecting all networks...');
+        }
+        
+        function jumpServer() {
+            addLog('Jumping server...');
+        }
+        
+        function addLog(message) {
+            const logs = document.getElementById('logs');
+            const time = new Date().toLocaleTimeString();
+            logs.innerHTML += `<div class="log-entry"><span class="log-time">${time}</span> ${message}</div>`;
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        // WebSocket events
+        socket.on('status_update', (data) => {
+            addLog(`Status update: ${JSON.stringify(data)}`);
+        });
+        
+        socket.on('irc_message', (data) => {
+            addLog(`[${data.network}] ${data.raw?.substring(0, 50)}...`);
+        });
+        
+        // Initial load
+        refreshStatus();
+        refreshNetworks();
+        
+        // Auto-refresh every 30s
+        setInterval(refreshStatus, 30000);
+        setInterval(refreshNetworks, 30000);
+    </script>
+</body>
+</html>
