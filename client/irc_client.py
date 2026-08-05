@@ -10,9 +10,9 @@ from typing import Optional, List, Callable, Dict, Set
 from datetime import datetime
 from dataclasses import dataclass, field
 
-from ..config import IrcNetworkConfig
-from ..shared import IrcMessage, ChannelMessage, BufferManager
-from .connection import IrcConnection
+from config import IrcNetworkConfig
+from shared import IrcMessage, ChannelMessage, BufferManager
+from client.connection import IrcConnection
 
 
 @dataclass

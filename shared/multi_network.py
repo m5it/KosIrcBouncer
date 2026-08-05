@@ -8,8 +8,8 @@ from typing import Dict, List, Optional, Set
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from ..config import IrcNetworkConfig
-from ..client import IrcClient
+from config import IrcNetworkConfig
+from client import IrcClient
 from .buffer import BufferManager
 
 

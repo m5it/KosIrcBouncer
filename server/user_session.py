@@ -9,8 +9,8 @@ import re
 from typing import Optional, List, Callable, Dict
 from datetime import datetime
 
-from ..shared import IrcMessage, UserConnection
-from ..client import IrcClient
+from shared import IrcMessage, UserConnection
+from client import IrcClient
 
 
 class UserSession(threading.Thread):

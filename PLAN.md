@@ -1,84 +1,36 @@
-# Plan: Add IPv6 Support to IRC Bouncer
+# Plan: Fix Python Import Errors
 ## ID: 1783339161.9945092
-## Created: 2026-07-06 11:59:21
+## Created: 2026-07-06 13:59:21
 ## Status: in_progress
 
 ### Goal:
-Add full IPv6 support to the IRC bouncer so it can connect to IPv6 IRC servers. This includes updating the socket creation to support dual-stack (IPv4/IPv6), using getaddrinfo for proper address resolution, and ensuring both IPv4 and IPv6 connections work seamlessly.
+Fix the Python import errors so that `python main.py --help` works correctly. The main issues are: missing __init__.py files in package directories, relative imports failing when running as a script, and potential corrupted files from previous edits.
 
-### Tasks (4):
-1. [pending] Update IrcConnection to use getaddrinfo for address resolution
+### Tasks (8):
+1. [completed] Modify the IrcConnection class in client/connection.py to re
    ID: 1783339164.6129656
+   Progress logs: 1 entries
 
-2. [pending] Add dual-stack socket support with IPV6_V6ONLY disabled
+2. [completed] In the IrcConnection.connect() method, when creating the soc
    ID: 1783339166.6028326
 
-3. [pending] Update bind address configuration for IPv6
+3. [completed] Modify the BncServerConfig class in config/settings.py to su
    ID: 1783339168.66733
 
-4. [pending] Update connection statistics to report address family
+4. [completed] Modify the get_stats() method in IrcConnection class to incl
    ID: 1783339170.4753275
 
----
+5. [pending] Create missing __init__.py files
+   ID: 1785958274.2387862
 
-# Plan: Add IPv6 Support to IRC Bouncer
-## ID: 1783339161.9945092
-## Created: 2026-07-06 11:59:21
-## Status: in_progress
+6. [pending] Convert relative imports to absolute imports
+   ID: 1785958277.156776
 
-### Goal:
-Add full IPv6 support to the IRC bouncer so it can connect to IPv6 IRC servers. This includes updating the socket creation to support dual-stack (IPv4/IPv6), using getaddrinfo for proper address resolution, and ensuring both IPv4 and IPv6 connections work seamlessly.
+7. [pending] Verify and fix corrupted files
+   ID: 1785958281.848345
 
-### Tasks (3):
-1. [pending] Update IrcConnection to use getaddrinfo for address resolution
-   ID: 1783339164.6129656
-
-2. [pending] Add dual-stack socket support with IPV6_V6ONLY disabled
-   ID: 1783339166.6028326
-
-3. [pending] Update bind address configuration for IPv6
-   ID: 1783339168.66733
-
----
-
-# Plan: Add IPv6 Support to IRC Bouncer
-## ID: 1783339161.9945092
-## Created: 2026-07-06 11:59:21
-## Status: in_progress
-
-### Goal:
-Add full IPv6 support to the IRC bouncer so it can connect to IPv6 IRC servers. This includes updating the socket creation to support dual-stack (IPv4/IPv6), using getaddrinfo for proper address resolution, and ensuring both IPv4 and IPv6 connections work seamlessly.
-
-### Tasks (2):
-1. [pending] Update IrcConnection to use getaddrinfo for address resolution
-   ID: 1783339164.6129656
-
-2. [pending] Add dual-stack socket support with IPV6_V6ONLY disabled
-   ID: 1783339166.6028326
-
----
-
-# Plan: Add IPv6 Support to IRC Bouncer
-## ID: 1783339161.9945092
-## Created: 2026-07-06 11:59:21
-## Status: in_progress
-
-### Goal:
-Add full IPv6 support to the IRC bouncer so it can connect to IPv6 IRC servers. This includes updating the socket creation to support dual-stack (IPv4/IPv6), using getaddrinfo for proper address resolution, and ensuring both IPv4 and IPv6 connections work seamlessly.
-
-### Tasks (1):
-1. [pending] Update IrcConnection to use getaddrinfo for address resolution
-   ID: 1783339164.6129656
-
----
-
-# Plan: Add IPv6 Support to IRC Bouncer
-## ID: 1783339161.9945092
-## Created: 2026-07-06 11:59:21
-## Status: in_progress
-
-### Goal:
-Add full IPv6 support to the IRC bouncer so it can connect to IPv6 IRC servers. This includes updating the socket creation to support dual-stack (IPv4/IPv6), using getaddrinfo for proper address resolution, and ensuring both IPv4 and IPv6 connections work seamlessly.
+8. [pending] Test main.py --help
+   ID: 1785958285.2013752
 
 ---
 

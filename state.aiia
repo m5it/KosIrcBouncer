@@ -1,0 +1,1 @@
+{"sess_id": 316, "model": "kimi-k2.7-code:cloud", "persona": "Generalist", "used_models": ["kimi-k2.5:cloud", "kimi-k2.7-code:cloud"], "mode": "build", "backend": "ollama", "NUM_PROMPT_TOKENS": 8390415, "NUM_RESPONSE_TOKENS": 11957, "NUM_LAST_PROMPT_TOKENS": 126869, "NUM_LAST_RESPONSE_TOKENS": 6}

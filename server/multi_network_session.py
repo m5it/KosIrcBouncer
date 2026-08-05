@@ -6,7 +6,7 @@ import socket
 import threading
 from typing import Optional, Dict, List
 
-from ..shared import IrcMessage, BufferManager, MultiNetworkManager
+from shared import IrcMessage, BufferManager, MultiNetworkManager
 
 
 class MultiNetworkSession(threading.Thread):

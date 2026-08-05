@@ -1,8 +1,7 @@
 """
-BNC Server module - Accepts connections from IRC clients
+BNC server package.
 """
 
 from .bnc_server import BncServer
-from .user_session import UserSession
 
-__all__ = ['BncServer', 'UserSession']
+__all__ = ['BncServer']

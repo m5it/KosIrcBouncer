@@ -9,8 +9,8 @@ import time
 from typing import Dict, List, Optional
 from datetime import datetime
 
-from ..config import BncServerConfig
-from ..client import IrcClient
+from config import BncServerConfig
+from client import IrcClient
 from .user_session import UserSession
 
 

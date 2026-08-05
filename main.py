@@ -7,6 +7,7 @@ import sys
 import signal
 import time
 import threading
+import argparse
 
 from config import Config, IrcNetworkConfig, BncServerConfig
 from shared import BufferManager
@@ -145,6 +146,17 @@ class IrcBnc:
 
 def main():
     """Entry point."""
+    parser = argparse.ArgumentParser(
+        description='IRC BNC - IRC Bouncer System',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''Examples:
+  python main.py           # Start the BNC
+  python main.py --help    # Show this help message
+        '''
+    )
+    parser.add_argument('--version', action='version', version='IRC BNC 1.0')
+    args = parser.parse_args()
+    
     bnc = IrcBnc()
     bnc.setup()
     return bnc.run()

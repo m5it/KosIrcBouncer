@@ -1,11 +1,22 @@
 """
-Shared utilities and data structures
+Shared utilities for the IRC BNC.
 """
 
+from .buffer import BufferManager, BufferEntry
 from .message import IrcMessage, ChannelMessage, UserConnection
-from .buffer import MessageBuffer, BufferManager
+from .auth import UserDatabase, PasswordHasher, UserAccount, RateLimiter, IPFilter
+from .multi_network import MultiNetworkManager
 
 __all__ = [
-    'IrcMessage', 'ChannelMessage', 'UserConnection',
-    'MessageBuffer', 'BufferManager'
+    'BufferManager',
+    'BufferEntry',
+    'IrcMessage',
+    'ChannelMessage',
+    'UserConnection',
+    'UserDatabase',
+    'PasswordHasher',
+    'UserAccount',
+    'RateLimiter',
+    'IPFilter',
+    'MultiNetworkManager'
 ]

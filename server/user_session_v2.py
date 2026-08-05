@@ -10,8 +10,8 @@ from typing import Optional, List, Dict, Set, Callable
 from datetime import datetime
 from collections import defaultdict
 
-from ..shared import IrcMessage, BufferManager, BufferEntry
-from ..client import IrcClient
+from shared import IrcMessage, BufferManager, BufferEntry
+from client import IrcClient
 
 
 class UserSessionV2(threading.Thread):

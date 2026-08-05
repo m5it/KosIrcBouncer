@@ -9,7 +9,7 @@ import re
 from typing import Optional, List, Dict
 from datetime import datetime
 
-from ..shared import IrcMessage, BufferManager, UserDatabase, RateLimiter, IPFilter
+from shared import IrcMessage, BufferManager, UserDatabase, RateLimiter, IPFilter
 
 
 class AuthenticatedUserSession(threading.Thread):

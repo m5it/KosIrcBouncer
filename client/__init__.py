@@ -1,8 +1,8 @@
 """
-IRC Client module - Bot connection to IRC networks
+IRC BNC Client Package
 """
 
+from client.connection import IrcConnection
 from .irc_client import IrcClient
-from .connection import IrcConnection
 
-__all__ = ['IrcClient', 'IrcConnection']
+__all__ = ['IrcConnection', 'IrcClient']
