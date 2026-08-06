@@ -1,9 +1,9 @@
 {
   "id": "1783339161.9945092",
-  "title": "Fix Python Import Errors",
-  "instructions": "Fix the Python import errors so that `python main.py --help` works correctly. The main issues are: missing __init__.py files in package directories, relative imports failing when running as a script, and potential corrupted files from previous edits.",
+  "title": "Send Status Information to IRC Client on BNC Connect",
+  "instructions": "When an IRC client connects to the BNC server, the BNC should send initial status information such as connection status, current nickname, joined channels, available networks, and any buffered messages. This improves the user experience so the client does not just sit silently after connecting.",
   "startTimestamp": 1783339161.9945126,
-  "endTimestamp": 1785958573.9538057,
+  "endTimestamp": 1785975689.7066934,
   "tasks": {
     "1783339164.6129656": {
       "id": "1783339164.6129656",
@@ -13,7 +13,7 @@
       "endTimestamp": null,
       "log": [
         {
-          "timestamp": 1785958083.146516,
+          "timestamp": 1785975465.3207223,
           "text": "Build started"
         }
       ]
@@ -50,15 +50,15 @@
       "endTimestamp": 1785958303.0324576,
       "log": [
         {
-          "timestamp": 1785958288.001423,
+          "timestamp": 1785975465.3207343,
           "text": "Build started"
         },
         {
-          "timestamp": 1785958288.0078561,
+          "timestamp": 1785975465.3207352,
           "text": "Build started"
         },
         {
-          "timestamp": 1785958290.2578156,
+          "timestamp": 1785975465.3207357,
           "text": "Starting task: checking for missing __init__.py files in package directories"
         }
       ]
@@ -71,7 +71,7 @@
       "endTimestamp": 1785958314.3612456,
       "log": [
         {
-          "timestamp": 1785958305.6417933,
+          "timestamp": 1785975465.3207586,
           "text": "Starting task: converting relative imports to absolute imports"
         }
       ]
@@ -84,7 +84,7 @@
       "endTimestamp": 1785958374.5251527,
       "log": [
         {
-          "timestamp": 1785958317.5622091,
+          "timestamp": 1785975465.3207607,
           "text": "Starting task: verifying and fixing potentially corrupted files"
         }
       ]
@@ -97,8 +97,80 @@
       "endTimestamp": 1785958573.9498036,
       "log": [
         {
-          "timestamp": 1785958376.9407797,
+          "timestamp": 1785975465.3207622,
           "text": "Starting task: testing main.py --help"
+        }
+      ]
+    },
+    "1785975529.8729699": {
+      "id": "1785975529.8729699",
+      "status": "completed",
+      "instruction": "Read server/user_session.py and related files to understand how the BNC currently handles a new IRC client connection, what messages it sends, and where to hook in initial status information.",
+      "startTimestamp": 1785975542.7534835,
+      "endTimestamp": 1785975556.7066216,
+      "log": [
+        {
+          "timestamp": 1785975542.754555,
+          "text": "Build started"
+        },
+        {
+          "timestamp": 1785975542.769735,
+          "text": "Build started"
+        },
+        {
+          "timestamp": 1785975545.8915448,
+          "text": "Starting task: reading user_session.py and related session files"
+        },
+        {
+          "timestamp": 1785975553.6555283,
+          "text": "Read server/user_session.py and related files. Found that _send_welcome() is called at session start and after auth, but only sends basic IRC welcome numerics. Status info about networks/channels is only sent on /BNC STATUS or /BNC CONNECT commands, not automatically on connect."
+        }
+      ]
+    },
+    "1785975532.9826703": {
+      "id": "1785975532.9826703",
+      "status": "completed",
+      "instruction": "Define what status information should be sent to the IRC client upon successful BNC connection. Include: BNC welcome notice, current network status, nickname, channels, available networks, and optionally recent buffered messages.",
+      "startTimestamp": 1785975556.706628,
+      "endTimestamp": 1785975565.251151,
+      "log": [
+        {
+          "timestamp": 1785975560.0341003,
+          "text": "Designing status messages to send automatically after BNC authentication/connection"
+        }
+      ]
+    },
+    "1785975536.1874995": {
+      "id": "1785975536.1874995",
+      "status": "completed",
+      "instruction": "Modify server/user_session.py (or the appropriate session file) to send the designed status messages after authentication or immediately after connection. Use IRC NOTICE format so clients display it in their status window.",
+      "startTimestamp": 1785975565.2511544,
+      "endTimestamp": 1785975639.607731,
+      "log": [
+        {
+          "timestamp": 1785975567.7320154,
+          "text": "Starting task: implementing automatic status messages in UserSession"
+        },
+        {
+          "timestamp": 1785975636.2401667,
+          "text": "Implemented _send_connection_status() method and call it after _send_welcome() in _try_authenticate(). Method sends BNC welcome, available networks with connection status/nick, auto-attach or connect hints, and help hint. All syntax checks pass."
+        }
+      ]
+    },
+    "1785975540.0525284": {
+      "id": "1785975540.0525284",
+      "status": "completed",
+      "instruction": "Run the BNC and connect with a simple IRC client (e.g., `nc` or `telnet`) to verify that status messages are sent immediately after connection. Capture the output and confirm it contains expected status information.",
+      "startTimestamp": 1785975639.607734,
+      "endTimestamp": 1785975689.7016275,
+      "log": [
+        {
+          "timestamp": 1785975642.7184691,
+          "text": "Starting task: testing BNC client connection and verifying status output"
+        },
+        {
+          "timestamp": 1785975687.1479435,
+          "text": "Tested BNC client connection. Status messages are sent automatically after authentication: welcome, available networks (libera connected with nick bipbip), auto-attach hint, and help hint. All expected messages found in client output."
         }
       ]
     }

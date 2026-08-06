@@ -204,10 +204,42 @@ class UserSession(threading.Thread):
         # Send welcome
         self._send_welcome()
         
+        # Send BNC status information
+        self._send_connection_status()
+        
         # If only one network, auto-connect
         if len(self.irc_clients) == 1:
             network = list(self.irc_clients.keys())[0]
             self._attach_to_network(network)
+    
+    def _send_connection_status(self) -> None:
+        """Send BNC status information to the IRC client."""
+        if not self.nick:
+            return
+        
+        self._send(f":BNC NOTICE {self.nick} :Welcome to IRC BNC")
+        self._send(f":BNC NOTICE {self.nick} :You are authenticated as {self.nick}")
+        
+        # Show available networks
+        if self.irc_clients:
+            self._send(f":BNC NOTICE {self.nick} :Available networks:")
+            for name, client in self.irc_clients.items():
+                if client.is_connected():
+                    status = f"connected (nick: {client.state.current_nick})"
+                else:
+                    status = "disconnected"
+                self._send(f":BNC NOTICE {self.nick} :  - {name}: {status}")
+        else:
+            self._send(f":BNC NOTICE {self.nick} :No networks configured")
+        
+        # Auto-attach hint or connect hint
+        if len(self.irc_clients) == 1:
+            network = list(self.irc_clients.keys())[0]
+            self._send(f":BNC NOTICE {self.nick} :Auto-attaching to {network}...")
+        elif len(self.irc_clients) > 1:
+            self._send(f":BNC NOTICE {self.nick} :Use /BNC CONNECT <network> to attach to a network")
+        
+        self._send(f":BNC NOTICE {self.nick} :Use /BNC STATUS for status and /BNC HELP for commands")
     
     def _attach_to_network(self, network_name: str) -> None:
         """Attach to an IRC network."""

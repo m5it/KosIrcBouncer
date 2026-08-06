@@ -42,36 +42,78 @@ class BncServer:
         # Setup SSL if configured
         if config.ssl_cert and config.ssl_key:
             self._setup_ssl()
-    
     def _setup_ssl(self) -> None:
         """Setup SSL context."""
         self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         self.ssl_context.load_cert_chain(self.config.ssl_cert, self.config.ssl_key)
         print(f"[BNC] SSL configured with {self.config.ssl_cert}")
+    def _is_ipv6_address(self, host: str) -> bool:
+        """Check if host is an IPv6 address."""
+        if host in ('::', '::1', '::ffff:0.0.0.0'):
+            return True
+        try:
+            socket.inet_pton(socket.AF_INET6, host)
+            return True
+        except (OSError, AttributeError):
+            return False
     
     def start(self) -> bool:
-        """Start BNC server."""
+        """Start BNC server with IPv4/IPv6 support and fallback."""
+        bind_host = self.config.bind_host
+        bind_port = self.config.bind_port
+        
+        # Try IPv6 first if address looks like IPv6
+        if self._is_ipv6_address(bind_host):
+            try:
+                self.socket = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                
+                # Enable dual-stack unless ipv6_only is set
+                if not getattr(self.config, 'ipv6_only', False):
+                    try:
+                        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                    except (AttributeError, OSError):
+                        pass
+                
+                self.socket.bind((bind_host, bind_port, 0, 0))
+                self.socket.listen(5)
+                return self._start_accept_loop("IPv6/dual-stack")
+                
+            except Exception as e:
+                print(f"[BNC] IPv6 bind failed ({bind_host}:{bind_port}): {e}")
+                print("[BNC] Falling back to IPv4...")
+                if self.socket:
+                    try:
+                        self.socket.close()
+                    except:
+                        pass
+                    self.socket = None
+        
+        # IPv4 fallback or explicit IPv4 bind
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.socket.bind((self.config.bind_host, self.config.bind_port))
+            self.socket.bind((bind_host, bind_port))
             self.socket.listen(5)
-            
-            self.running = True
-            self.start_time = datetime.now()
-            
-            # Start server thread
-            self._server_thread = threading.Thread(target=self._accept_loop)
-            self._server_thread.daemon = True
-            self._server_thread.start()
-            
-            proto = "SSL" if self.ssl_context else "plain"
-            print(f"[BNC] Server started on {self.config.bind_host}:{self.config.bind_port} ({proto})")
-            return True
+            return self._start_accept_loop("IPv4")
             
         except Exception as e:
-            print(f"[BNC] Failed to start server: {e}")
+            print(f"[BNC] Failed to start server on {bind_host}:{bind_port}: {e}")
             return False
+    
+    def _start_accept_loop(self, mode: str) -> bool:
+        """Start the accept loop after successful bind."""
+        self.running = True
+        self.start_time = datetime.now()
+        
+        # Start server thread
+        self._server_thread = threading.Thread(target=self._accept_loop)
+        self._server_thread.daemon = True
+        self._server_thread.start()
+        
+        proto = "SSL" if self.ssl_context else "plain"
+        print(f"[BNC] Server started on {self.config.bind_host}:{self.config.bind_port} ({mode}, {proto})")
+        return True
     
     def stop(self) -> None:
         """Stop BNC server."""

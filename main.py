@@ -4,6 +4,7 @@ IRC BNC - Main Entry Point
 """
 
 import sys
+import os
 import signal
 import time
 import threading
@@ -150,15 +151,30 @@ def main():
         description='IRC BNC - IRC Bouncer System',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''Examples:
-  python main.py           # Start the BNC
-  python main.py --help    # Show this help message
+  python main.py              # Start the BNC
+  python main.py --config file.json   # Use custom config file
+  python main.py --help       # Show this help message
         '''
+    )
+    parser.add_argument(
+        '--config',
+        default='config.json',
+        help='Path to config file (default: config.json)'
     )
     parser.add_argument('--version', action='version', version='IRC BNC 1.0')
     args = parser.parse_args()
     
     bnc = IrcBnc()
-    bnc.setup()
+    
+    # Load config from file if it exists, otherwise use defaults
+    config_path = args.config
+    if os.path.isfile(config_path):
+        print(f"[Config] Loading configuration from {config_path}")
+        bnc.config.load_from_file(config_path)
+    else:
+        print(f"[Config] {config_path} not found, using default configuration")
+        bnc.setup()
+    
     return bnc.run()
 
 
