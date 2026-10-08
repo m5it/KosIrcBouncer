@@ -25,6 +25,7 @@ class IrcState:
     channels: Dict[str, dict] = field(default_factory=dict)
     users: Dict[str, dict] = field(default_factory=dict)
     away_message: Optional[str] = None
+    registration_burst: List[str] = field(default_factory=list)
 
 
 class IrcClient:
@@ -197,16 +198,23 @@ class IrcClient:
     def _handle_numeric(self, msg: IrcMessage) -> None:
         """Handle numeric IRC replies."""
         code = int(msg.command)
-        
+
+        # Capture the registration burst (001, 002, 003, 004, 005, 251, 252,
+        # 253, 254, 255, 265, 266, 372, 375, 376, and related notices).
+        # We store them so they can be replayed to IRC clients that attach
+        # after the network connection is already registered.
+        if not self.state.registered:
+            self.state.registration_burst.append(msg.raw)
+
         if code == 1:  # RPL_WELCOME
             self.state.registered = True
             print(f"[IRC] Connected as {self.state.current_nick}")
-        
+
         elif code == 433:  # ERR_NICKNAMEINUSE
             # Try alternative nick
             self.state.current_nick = f"{self.state.nick}_"
             self._send(f"NICK {self.state.current_nick}")
-        
+
         elif code == 376:  # RPL_ENDOFMOTD
             # Join configured channels
             for channel in self.config.channels:
@@ -214,6 +222,11 @@ class IrcClient:
     
     def _handle_command(self, msg: IrcMessage) -> None:
         """Handle IRC commands."""
+        # Capture server notices that arrive before registration completes,
+        # e.g. NickServ "This nickname is registered."
+        if msg.command == 'NOTICE' and not self.state.registered:
+            self.state.registration_burst.append(msg.raw)
+
         handlers = {
             'PING': self._handle_ping,
             'PRIVMSG': self._handle_privmsg,
@@ -224,7 +237,7 @@ class IrcClient:
             'NICK': self._handle_nick,
             'MODE': self._handle_mode,
         }
-        
+
         handler = handlers.get(msg.command)
         if handler:
             handler(msg)

@@ -256,16 +256,19 @@ class UserSession(threading.Thread):
         
         # Send connection info
         if client.is_connected():
-            self._send(f":server 001 {self.nick} :Welcome to BNC")
-            self._send(f":server 002 {self.nick} :Your host is BNC, running version 1.0")
-            self._send(f":server 003 {self.nick} :This server was created now")
-            
-            # Send nick info
-            self._send(f":server 433 {self.nick} {client.state.current_nick}")
-            
+            # Replay the real registration burst (001/002/003/.../376/MOTD/
+            # NickServ notices) that the upstream IRC server sent.  This lets
+            # the IRC client know it is attached to a fully registered session.
+            for line in client.state.registration_burst:
+                self._send(line)
+
+            # Re-emit our current nick as a NICK command so the client knows
+            # what nickname this session is using.
+            self._send(f":{client.state.current_nick}!user@host NICK :{client.state.current_nick}")
+
             # Play buffer
             self._send_buffer_playback(network_name)
-            
+
             # Send joined channels
             for channel in client.get_channel_list():
                 self._send(f":{client.state.current_nick}!user@host JOIN {channel}")
