@@ -30,6 +30,10 @@ class IrcState:
     channel_names: Dict[str, List[str]] = field(default_factory=dict)
     # Last seen 352/315 WHO reply burst per channel, keyed by lowercase channel name.
     channel_who: Dict[str, List[str]] = field(default_factory=dict)
+    # Last seen 324/329 channel mode burst per channel, keyed by lowercase channel name.
+    channel_modes: Dict[str, List[str]] = field(default_factory=dict)
+    # Our own hostmask as reported by the IRC server (e.g. from 001/002 or 396).
+    hostmask: Optional[str] = None
 
 
 class IrcClient:
@@ -217,7 +221,15 @@ class IrcClient:
 
         if code == 1:  # RPL_WELCOME
             self.state.registered = True
+            # Try to extract our real hostmask from the welcome text if present.
+            if msg.trailing:
+                # "Welcome to the ... Network <nick>" - no hostmask, but 002/396 will update it.
+                pass
             print(f"[IRC] Connected as {self.state.current_nick}")
+
+        elif code == 396:  # RPL_HOSTHIDDEN / visible host
+            if len(msg.params) >= 3:
+                self.state.hostmask = msg.params[1]
 
         elif code == 433:  # ERR_NICKNAMEINUSE
             # Try alternative nick
@@ -229,6 +241,12 @@ class IrcClient:
 
         elif code == 366:  # RPL_ENDOFNAMES
             self._handle_endofnames(msg)
+
+        elif code == 324:  # RPL_CHANNELMODEIS
+            self._handle_channelmodeis(msg)
+
+        elif code == 329:  # RPL_CREATIONTIME
+            self._handle_creationtime(msg)
 
         elif code == 352:  # RPL_WHOREPLY
             self._handle_whoreply(msg)
@@ -317,10 +335,11 @@ class IrcClient:
                     'name': channel,
                     'joined': True
                 }
-                # Reset cached names/who for this channel so we capture the
+                # Reset cached metadata for this channel so we capture the
                 # fresh lists sent after joining.
                 self.state.channel_names[channel_lower] = []
                 self.state.channel_who[channel_lower] = []
+                self.state.channel_modes[channel_lower] = []
                 print(f"[IRC] Joined {channel}")
 
     def _handle_part(self, msg: IrcMessage) -> None:
@@ -332,6 +351,7 @@ class IrcClient:
                 self.state.channels.pop(channel_lower, None)
                 self.state.channel_names.pop(channel_lower, None)
                 self.state.channel_who.pop(channel_lower, None)
+                self.state.channel_modes.pop(channel_lower, None)
     
     def _handle_quit(self, msg: IrcMessage) -> None:
         """Handle QUIT."""
@@ -364,8 +384,22 @@ class IrcClient:
         """Capture RPL_ENDOFNAMES (366) for later replay."""
         if len(msg.params) < 3:
             return
-        channel = msg.params[2].lstrip(':').lower()
+        channel = msg.params[2 - (len(msg.params) == 3)].lstrip(':').lower()
         self.state.channel_names.setdefault(channel, []).append(msg.raw)
+
+    def _handle_channelmodeis(self, msg: IrcMessage) -> None:
+        """Capture RPL_CHANNELMODEIS (324) for later replay."""
+        if len(msg.params) < 3:
+            return
+        channel = msg.params[2 - (len(msg.params) == 3)].lstrip(':').lower()
+        self.state.channel_modes.setdefault(channel, []).append(msg.raw)
+
+    def _handle_creationtime(self, msg: IrcMessage) -> None:
+        """Capture RPL_CREATIONTIME (329) for later replay."""
+        if len(msg.params) < 3:
+            return
+        channel = msg.params[2 - (len(msg.params) == 3)].lstrip(':').lower()
+        self.state.channel_modes.setdefault(channel, []).append(msg.raw)
 
     def _handle_whoreply(self, msg: IrcMessage) -> None:
         """Capture RPL_WHOREPLY (352) for later replay."""

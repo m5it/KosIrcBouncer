@@ -321,17 +321,23 @@ class UserSession(threading.Thread):
 
             # Re-join channels the user had previously saved, plus channels the
             # upstream client is already in.
+            hostmask = client.state.hostmask or f"{client.state.current_nick}!user@host"
             saved = self._get_saved_channels(network_name)
             irc_channels = set(client.get_channel_list())
             all_channels = irc_channels | saved
             for channel in sorted(all_channels):
+                channel_lower = channel.lower()
                 if channel not in irc_channels:
                     client.join_channel(channel)
-                self._send(f":{client.state.current_nick}!user@host JOIN {channel}")
+                self._send(f":{hostmask} JOIN {channel}")
 
-                # Replay the most recent 353/366 names list for this channel.
-                names_burst = client.state.channel_names.get(channel.lower(), [])
-                for line in names_burst:
+                # Replay channel metadata: modes, names, and WHO replies.
+                # This is exactly what HexChat expects after a JOIN.
+                for line in client.state.channel_modes.get(channel_lower, []):
+                    self._send(line)
+                for line in client.state.channel_names.get(channel_lower, []):
+                    self._send(line)
+                for line in client.state.channel_who.get(channel_lower, []):
                     self._send(line)
         else:
             self._send(f":server NOTICE * :Network {network_name} not connected")
