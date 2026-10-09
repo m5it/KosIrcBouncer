@@ -10,7 +10,9 @@ from typing import Dict, List, Optional
 from datetime import datetime
 
 from config import BncServerConfig
+from shared import UserDatabase, BufferManager
 from client import IrcClient
+from .bnc_commands import BncCommandHandler
 from .user_session import UserSession
 
 
@@ -19,26 +21,30 @@ class BncServer:
     Main BNC server that accepts IRC client connections.
     Bridges users to IRC networks.
     """
-    
-    def __init__(self, config: BncServerConfig, irc_clients: Dict[str, IrcClient]):
+
+    def __init__(self, config: BncServerConfig, irc_clients: Dict[str, IrcClient],
+                 user_db: Optional[UserDatabase] = None,
+                 buffer_manager: Optional[BufferManager] = None):
         self.config = config
         self.irc_clients = irc_clients  # Available IRC connections
-        
+        self.user_db = user_db
+        self.buffer_manager = buffer_manager
+
         self.socket: Optional[socket.socket] = None
         self.ssl_context: Optional[ssl.SSLContext] = None
-        
+
         # Active sessions
         self.sessions: List[UserSession] = []
         self._lock = threading.Lock()
-        
+
         # Running state
         self.running = False
         self._server_thread: Optional[threading.Thread] = None
-        
+
         # Statistics
         self.start_time: Optional[datetime] = None
         self.total_connections = 0
-        
+
         # Setup SSL if configured
         if config.ssl_cert and config.ssl_key:
             self._setup_ssl()
@@ -172,7 +178,9 @@ class BncServer:
             conn=conn,
             addr=addr,
             irc_clients=self.irc_clients,
-            require_auth=self.config.require_auth
+            require_auth=self.config.require_auth,
+            user_db=self.user_db,
+            buffer_manager=self.buffer_manager,
         )
         
         with self._lock:

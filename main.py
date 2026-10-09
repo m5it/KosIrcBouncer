@@ -11,7 +11,7 @@ import threading
 import argparse
 
 from config import Config, IrcNetworkConfig, BncServerConfig
-from shared import BufferManager
+from shared import BufferManager, UserDatabase, PasswordHasher, UserAccount
 from client import IrcClient
 from server import BncServer
 
@@ -25,7 +25,8 @@ class IrcBnc:
         
         self.irc_clients: dict = {}
         self.bnc_server: BncServer = None
-        
+        self.user_db: UserDatabase = None
+
         self.running = False
     
     def setup(self):
@@ -67,12 +68,27 @@ class IrcBnc:
         
         # Wait a bit for connections
         time.sleep(2)
-        
+
+        # Load users from config into UserDatabase
+        self.user_db = UserDatabase(self.config.data_dir)
+        for user_cfg in self.config.users.values():
+            if user_cfg.username not in self.user_db.users:
+                self.user_db.users[user_cfg.username] = UserAccount(
+                    username=user_cfg.username,
+                    password_hash=user_cfg.password_hash,
+                    is_admin=user_cfg.is_admin,
+                    allowed_networks=set(user_cfg.allowed_networks),
+                )
+        self.user_db.save()
+        print(f"[Setup] Loaded {len(self.user_db.users)} user(s) from config")
+
         # Start BNC server
         print(f"\n[Setup] Starting BNC server...")
         self.bnc_server = BncServer(
             self.config.bnc_server,
-            self.irc_clients
+            self.irc_clients,
+            user_db=self.user_db,
+            buffer_manager=self.buffer_manager,
         )
         
         if not self.bnc_server.start():

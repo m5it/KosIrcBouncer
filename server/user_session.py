@@ -9,7 +9,7 @@ import re
 from typing import Optional, List, Callable, Dict
 from datetime import datetime
 
-from shared import IrcMessage, UserConnection
+from shared import IrcMessage, UserConnection, UserDatabase, PasswordHasher
 from client import IrcClient
 
 
@@ -19,40 +19,44 @@ class UserSession(threading.Thread):
     Bridges user commands to/from IRC network.
     """
     
-    def __init__(self, conn: socket.socket, addr: tuple, 
+    def __init__(self, conn: socket.socket, addr: tuple,
                  irc_clients: Dict[str, IrcClient],
-                 require_auth: bool = True):
+                 require_auth: bool = True,
+                 user_db: Optional[UserDatabase] = None,
+                 buffer_manager=None):
         super().__init__(daemon=True)
-        
+
         self.conn = conn
         self.addr = addr
         self.irc_clients = irc_clients  # Available IRC connections
         self.require_auth = require_auth
-        
+        self.user_db = user_db
+        self.buffer_manager = buffer_manager
+
         # Session state
         self.authenticated = False
         self.username: Optional[str] = None
         self.password: Optional[str] = None
         self.nick: Optional[str] = None
         self.realname: Optional[str] = None
-        
+
         # IRC network selection
         self.current_network: Optional[str] = None
         self.selected_client: Optional[IrcClient] = None
-        
+
         # Capabilities
         self.capabilities: List[str] = []
         self.cap_negotiation = False
-        
+
         # Buffer playback
         self.connected_at = datetime.now()
         self.last_buffer_time: Optional[datetime] = None
-        
+
         # Running state
         self.running = False
         self.ping_sent = False
         self.last_pong = time.time()
-        
+
         # Statistics
         self.messages_sent = 0
         self.messages_received = 0
@@ -188,29 +192,49 @@ class UserSession(threading.Thread):
             self._try_authenticate()
     
     def _try_authenticate(self) -> None:
-        """Try to authenticate user."""
+        """Try to authenticate user with PASS or user database."""
         if self.authenticated:
             return
-        
-        # Simple password check (should use hashed passwords in production)
+
         if self.require_auth:
             if not self.password:
                 return  # Wait for PASS
-            # TODO: Validate against user database
-        
+
+            if not self._check_password(self.password):
+                self._send(":server 464 * :Password required")
+                print(f"[BNC] Authentication failed for {self.addr}")
+                return
+
         self.authenticated = True
         print(f"[BNC] User authenticated: {self.nick}")
-        
+
         # Send welcome
         self._send_welcome()
-        
+
         # Send BNC status information
         self._send_connection_status()
-        
+
         # If only one network, auto-connect
         if len(self.irc_clients) == 1:
             network = list(self.irc_clients.keys())[0]
             self._attach_to_network(network)
+
+    def _check_password(self, password: str) -> bool:
+        """Verify supplied password against configured users."""
+        if not self.user_db:
+            # No user database: accept any non-empty password (testing mode)
+            return bool(password)
+
+        # Try matching by username if one was supplied, otherwise try all users.
+        client_ip = self.addr[0]
+        if self.username and self.username in self.user_db.users:
+            return self.user_db.authenticate(self.username, password, client_ip) is not None
+
+        for username, user in self.user_db.users.items():
+            if user.check_password(password):
+                self.username = username
+                return True
+        return False
     
     def _send_connection_status(self) -> None:
         """Send BNC status information to the IRC client."""

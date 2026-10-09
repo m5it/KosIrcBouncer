@@ -33,26 +33,29 @@ class BncCommandHandler:
             'JUMP': self.cmd_jump,
             'NETWORKS': self.cmd_networks,
             'STATUS': self.cmd_status,
-            
+
+            # Authentication
+            'LOGIN': self.cmd_login,
+
             # Message commands
             'SAY': self.cmd_say,
             'RAW': self.cmd_raw,
             'QUOTE': self.cmd_raw,  # Alias
-            
+
             # User management (admin only)
             'ADDUSER': self.cmd_adduser,
             'DELUSER': self.cmd_deluser,
             'LISTUSERS': self.cmd_listusers,
             'SETPASS': self.cmd_setpass,
-            
+
             # Buffer commands
             'BUFFER': self.cmd_buffer,
             'CLEARBUFFER': self.cmd_clearbuffer,
-            
+
             # Session commands
             'DETACH': self.cmd_detach,
             'ATTACH': self.cmd_attach,
-            
+
             # Help
             'HELP': self.cmd_help,
         }
@@ -168,9 +171,9 @@ class BncCommandHandler:
             f":server NOTICE {session.nick} :User: {session.nick}",
             f":server NOTICE {session.nick} :Authenticated: {session.authenticated}",
             f":server NOTICE {session.nick} :Current Network: {session.current_network or 'None'}",
-            f":server NOTICE {session.nick} :Detached: {session.detached}",
+            f":server NOTICE {session.nick} :Detached: {getattr(session, 'detached', False)}",
         ]
-        
+
         if session.selected_client and session.selected_client.is_connected():
             stats = session.selected_client.get_stats()
             responses.extend([
@@ -180,9 +183,32 @@ class BncCommandHandler:
                 f":server NOTICE {session.nick} :Bytes sent: {stats['bytes_sent']}",
                 f":server NOTICE {session.nick} :Bytes received: {stats['bytes_received']}",
             ])
-        
+
         responses.append(f":server NOTICE {session.nick} :==================")
         return responses
+
+    def cmd_login(self, session: object, args: List[str]) -> List[str]:
+        """Authenticate with BNC: /BNC LOGIN <username> <password>"""
+        if len(args) < 2:
+            return [f":server NOTICE {session.nick} :Usage: /BNC LOGIN <username> <password>"]
+
+        if not getattr(session, 'user_db', None):
+            return [f":server NOTICE {session.nick} :No user database configured"]
+
+        username, password = args[0], args[1]
+        client_ip = session.addr[0]
+        user = session.user_db.authenticate(username, password, client_ip)
+        if not user:
+            return [f":server NOTICE {session.nick} :Login failed"]
+
+        session.authenticated = True
+        session.username = username
+        if not session.nick:
+            session.nick = username
+        return [
+            f":server NOTICE {session.nick} :Login successful. Welcome {username}.",
+            f":server NOTICE {session.nick} :Use /BNC STATUS for status and /BNC HELP for commands",
+        ]
     
     # Message Commands
     
