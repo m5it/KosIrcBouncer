@@ -328,6 +328,11 @@ class UserSession(threading.Thread):
                 if channel not in irc_channels:
                     client.join_channel(channel)
                 self._send(f":{client.state.current_nick}!user@host JOIN {channel}")
+
+                # Replay the most recent 353/366 names list for this channel.
+                names_burst = client.state.channel_names.get(channel.lower(), [])
+                for line in names_burst:
+                    self._send(line)
         else:
             self._send(f":server NOTICE * :Network {network_name} not connected")
 
@@ -418,9 +423,25 @@ class UserSession(threading.Thread):
             self.selected_client._send(line)
     
     def _handle_who(self, params: List[str], line: str) -> None:
-        """Handle WHO."""
-        self._send(f":server 315 {self.nick} :End of /WHO list")
-    
+        """Handle WHO by forwarding to IRC and replaying any cached replies."""
+        if not params:
+            self._send(f":server 315 {self.nick} :End of /WHO list")
+            return
+
+        target = params[0].lstrip(':').lower()
+
+        # If we have a cached WHO reply burst for a channel, serve it directly.
+        if target.startswith('#') and self.selected_client:
+            cached = self.selected_client.state.channel_who.get(target, [])
+            if cached:
+                for cached_line in cached:
+                    self._send(cached_line)
+                return
+
+        # Forward to IRC. Replies will be buffered and relayed by _on_irc_message.
+        if self.selected_client:
+            self.selected_client._send(line)
+
     def _handle_whois(self, params: List[str], line: str) -> None:
         """Handle WHOIS."""
         if params:
@@ -446,10 +467,19 @@ class UserSession(threading.Thread):
     
     def _handle_names(self, params: List[str], line: str) -> None:
         """Handle NAMES."""
-        # Pass through
+        if not params:
+            return
+        channel = params[0].lstrip(':').lower()
+
+        # Serve cached names if available, otherwise pass through to IRC.
+        if self.selected_client and channel in self.selected_client.state.channel_names:
+            for cached_line in self.selected_client.state.channel_names[channel]:
+                self._send(cached_line)
+            return
+
         if self.selected_client:
             self.selected_client._send(line)
-    
+
     def _handle_bnc_command(self, params: List[str], line: str) -> None:
         """Handle BNC control commands."""
         if not self.command_handler:

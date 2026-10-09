@@ -26,6 +26,10 @@ class IrcState:
     users: Dict[str, dict] = field(default_factory=dict)
     away_message: Optional[str] = None
     registration_burst: List[str] = field(default_factory=list)
+    # Last seen 353/366 burst per channel, keyed by lowercase channel name.
+    channel_names: Dict[str, List[str]] = field(default_factory=dict)
+    # Last seen 352/315 WHO reply burst per channel, keyed by lowercase channel name.
+    channel_who: Dict[str, List[str]] = field(default_factory=dict)
 
 
 class IrcClient:
@@ -220,6 +224,18 @@ class IrcClient:
             self.state.current_nick = f"{self.state.nick}_"
             self._send(f"NICK {self.state.current_nick}")
 
+        elif code == 353:  # RPL_NAMREPLY
+            self._handle_namreply(msg)
+
+        elif code == 366:  # RPL_ENDOFNAMES
+            self._handle_endofnames(msg)
+
+        elif code == 352:  # RPL_WHOREPLY
+            self._handle_whoreply(msg)
+
+        elif code == 315:  # RPL_ENDOFWHO
+            self._handle_endofwho(msg)
+
         elif code == 376:  # RPL_ENDOFMOTD
             # Join configured channels
             for channel in self.config.channels:
@@ -296,18 +312,26 @@ class IrcClient:
         if msg.nick == self.state.current_nick:
             channel = msg.trailing or (msg.params[0] if msg.params else "")
             if channel:
-                self.state.channels[channel.lower()] = {
+                channel_lower = channel.lower()
+                self.state.channels[channel_lower] = {
                     'name': channel,
                     'joined': True
                 }
+                # Reset cached names/who for this channel so we capture the
+                # fresh lists sent after joining.
+                self.state.channel_names[channel_lower] = []
+                self.state.channel_who[channel_lower] = []
                 print(f"[IRC] Joined {channel}")
-    
+
     def _handle_part(self, msg: IrcMessage) -> None:
         """Handle PART."""
         if msg.nick == self.state.current_nick:
             channel = msg.params[0] if msg.params else ""
             if channel:
-                self.state.channels.pop(channel.lower(), None)
+                channel_lower = channel.lower()
+                self.state.channels.pop(channel_lower, None)
+                self.state.channel_names.pop(channel_lower, None)
+                self.state.channel_who.pop(channel_lower, None)
     
     def _handle_quit(self, msg: IrcMessage) -> None:
         """Handle QUIT."""
@@ -322,7 +346,41 @@ class IrcClient:
     def _handle_mode(self, msg: IrcMessage) -> None:
         """Handle MODE."""
         pass
-    
+
+    def _handle_namreply(self, msg: IrcMessage) -> None:
+        """Capture RPL_NAMREPLY (353) for later replay."""
+        if len(msg.params) < 4:
+            return
+        channel = msg.params[2].lstrip(':').lower()
+        names = msg.trailing or ""
+        self.state.channel_names.setdefault(channel, []).append(msg.raw)
+        # Update internal user list too.
+        for nick in names.split():
+            if nick.startswith('@') or nick.startswith('+'):
+                nick = nick[1:]
+            self.state.users[nick.lower()] = {'nick': nick, 'channels': {channel}}
+
+    def _handle_endofnames(self, msg: IrcMessage) -> None:
+        """Capture RPL_ENDOFNAMES (366) for later replay."""
+        if len(msg.params) < 3:
+            return
+        channel = msg.params[2].lstrip(':').lower()
+        self.state.channel_names.setdefault(channel, []).append(msg.raw)
+
+    def _handle_whoreply(self, msg: IrcMessage) -> None:
+        """Capture RPL_WHOREPLY (352) for later replay."""
+        if len(msg.params) < 7:
+            return
+        channel = msg.params[1].lstrip(':').lower()
+        self.state.channel_who.setdefault(channel, []).append(msg.raw)
+
+    def _handle_endofwho(self, msg: IrcMessage) -> None:
+        """Capture RPL_ENDOFWHO (315) for later replay."""
+        if len(msg.params) < 3:
+            return
+        channel = msg.params[1].lstrip(':').lower()
+        self.state.channel_who.setdefault(channel, []).append(msg.raw)
+
     def _on_connected(self) -> None:
         """Called when successfully connected."""
         print(f"[IRC] {self.config.name}: Connected")
