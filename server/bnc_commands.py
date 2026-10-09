@@ -205,9 +205,17 @@ class BncCommandHandler:
         session.username = username
         if not session.nick:
             session.nick = username
+
+        # Complete the login handshake exactly like PASS-based authentication:
+        # send the BNC welcome, status, and auto-attach to the only network.
+        session._send_welcome()
+        session._send_connection_status()
+        if len(session.irc_clients) == 1:
+            network = list(session.irc_clients.keys())[0]
+            session._attach_to_network(network)
+
         return [
             f":server NOTICE {session.nick} :Login successful. Welcome {username}.",
-            f":server NOTICE {session.nick} :Use /BNC STATUS for status and /BNC HELP for commands",
         ]
     
     # Message Commands

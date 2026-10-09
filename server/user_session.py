@@ -135,12 +135,7 @@ class UserSession(threading.Thread):
             self._try_authenticate()
             return
         
-        # Require authentication for other commands
-        if self.require_auth and not self.authenticated:
-            self._send(":server 464 * :Password required")
-            return
-        
-        # Authenticated commands
+        # Authenticated commands (BNC LOGIN and PASS may run before auth)
         handlers = {
             'PING': self._handle_ping,
             'PONG': self._handle_pong,
@@ -159,14 +154,25 @@ class UserSession(threading.Thread):
             # BNC control commands
             'BNC': self._handle_bnc_command,
         }
-        
+
         handler = handlers.get(cmd)
         if handler:
+            # BNC control commands can authenticate the user; don't reject them
+            # for being unauthenticated.
+            if self.require_auth and not self.authenticated and cmd != 'BNC':
+                self._send(":server 464 * :Password required")
+                return
             handler(parts[1:], line)
-        else:
-            # Pass through to IRC
-            if self.selected_client:
-                self.selected_client._send(line)
+            return
+
+        # Unknown command: require auth before passing through to IRC
+        if self.require_auth and not self.authenticated:
+            self._send(":server 464 * :Password required")
+            return
+
+        # Pass through to IRC
+        if self.selected_client:
+            self.selected_client._send(line)
     
     def _handle_cap(self, params: List[str]) -> None:
         """Handle CAP negotiation."""
