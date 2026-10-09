@@ -34,6 +34,10 @@ class IrcState:
     channel_modes: Dict[str, List[str]] = field(default_factory=dict)
     # Our own hostmask as reported by the IRC server (e.g. from 001/002 or 396).
     hostmask: Optional[str] = None
+    # Live channel user lists: channel_lower -> {nick_lower: prefix_char}.
+    channel_users: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    # IRC server name used as prefix for generated replies.
+    server_name: str = ""
 
 
 class IrcClient:
@@ -221,10 +225,9 @@ class IrcClient:
 
         if code == 1:  # RPL_WELCOME
             self.state.registered = True
-            # Try to extract our real hostmask from the welcome text if present.
-            if msg.trailing:
-                # "Welcome to the ... Network <nick>" - no hostmask, but 002/396 will update it.
-                pass
+            # Server name is the prefix of the welcome message.
+            if msg.prefix:
+                self.state.server_name = msg.prefix
             print(f"[IRC] Connected as {self.state.current_nick}")
 
         elif code == 396:  # RPL_HOSTHIDDEN / visible host
@@ -267,8 +270,15 @@ class IrcClient:
             self.state.registration_burst.append(msg.raw)
 
         # Buffer non-registration traffic for detached clients.
+        # Skip per-channel numerics (324/329/352/353/366/315) because they are
+        # captured per-channel and replayed with the channel metadata burst.
         if msg.raw and msg.command not in ('PING', 'PONG'):
-            self._buffer_message(msg.raw, msg.command.lower())
+            try:
+                code = int(msg.command)
+            except ValueError:
+                code = None
+            if code not in (324, 329, 352, 353, 366, 315):
+                self._buffer_message(msg.raw, msg.command.lower())
 
         handlers = {
             'PING': self._handle_ping,
@@ -277,6 +287,7 @@ class IrcClient:
             'JOIN': self._handle_join,
             'PART': self._handle_part,
             'QUIT': self._handle_quit,
+            'KICK': self._handle_kick,
             'NICK': self._handle_nick,
             'MODE': self._handle_mode,
         }
@@ -327,92 +338,180 @@ class IrcClient:
     
     def _handle_join(self, msg: IrcMessage) -> None:
         """Handle JOIN."""
-        if msg.nick == self.state.current_nick:
-            channel = msg.trailing or (msg.params[0] if msg.params else "")
-            if channel:
-                channel_lower = channel.lower()
-                self.state.channels[channel_lower] = {
-                    'name': channel,
-                    'joined': True
-                }
-                # Reset cached metadata for this channel so we capture the
-                # fresh lists sent after joining.
-                self.state.channel_names[channel_lower] = []
-                self.state.channel_who[channel_lower] = []
-                self.state.channel_modes[channel_lower] = []
-                print(f"[IRC] Joined {channel}")
+        nick = msg.nick
+        channel = msg.trailing or (msg.params[0] if msg.params else "")
+        if not nick or not channel:
+            return
+        channel_lower = channel.lower()
+
+        if nick == self.state.current_nick:
+            self.state.channels[channel_lower] = {
+                'name': channel,
+                'joined': True
+            }
+            # Reset cached metadata for this channel so we capture the
+            # fresh lists sent after joining.
+            self.state.channel_names[channel_lower] = []
+            self.state.channel_who[channel_lower] = []
+            self.state.channel_modes[channel_lower] = []
+            self.state.channel_users[channel_lower] = {}
+            print(f"[IRC] Joined {channel}")
+        else:
+            self.state.channel_users.setdefault(channel_lower, {})[nick.lower()] = ""
 
     def _handle_part(self, msg: IrcMessage) -> None:
         """Handle PART."""
-        if msg.nick == self.state.current_nick:
-            channel = msg.params[0] if msg.params else ""
-            if channel:
-                channel_lower = channel.lower()
-                self.state.channels.pop(channel_lower, None)
-                self.state.channel_names.pop(channel_lower, None)
-                self.state.channel_who.pop(channel_lower, None)
-                self.state.channel_modes.pop(channel_lower, None)
-    
+        nick = msg.nick
+        channel = msg.params[0] if msg.params else ""
+        if not nick or not channel:
+            return
+        channel_lower = channel.lower()
+
+        if nick == self.state.current_nick:
+            self.state.channels.pop(channel_lower, None)
+            self.state.channel_names.pop(channel_lower, None)
+            self.state.channel_who.pop(channel_lower, None)
+            self.state.channel_modes.pop(channel_lower, None)
+            self.state.channel_users.pop(channel_lower, None)
+        else:
+            self.state.channel_users.get(channel_lower, {}).pop(nick.lower(), None)
+
     def _handle_quit(self, msg: IrcMessage) -> None:
-        """Handle QUIT."""
-        pass  # User quit
-    
+        """Handle QUIT: remove nick from all channels."""
+        if not msg.nick:
+            return
+        nick_lower = msg.nick.lower()
+        for users in self.state.channel_users.values():
+            users.pop(nick_lower, None)
+
     def _handle_nick(self, msg: IrcMessage) -> None:
         """Handle NICK change."""
-        if msg.nick == self.state.current_nick:
-            new_nick = msg.trailing or (msg.params[0] if msg.params else "")
+        old_nick = msg.nick
+        new_nick = msg.trailing or (msg.params[0] if msg.params else "")
+        if not old_nick or not new_nick:
+            return
+        if old_nick == self.state.current_nick:
             self.state.current_nick = new_nick
-    
+
+        old_lower = old_nick.lower()
+        new_lower = new_nick.lower()
+        for users in self.state.channel_users.values():
+            if old_lower in users:
+                users[new_lower] = users.pop(old_lower)
+
+    def _handle_kick(self, msg: IrcMessage) -> None:
+        """Handle KICK."""
+        if len(msg.params) < 2:
+            return
+        channel = msg.params[0].lower()
+        target = msg.params[1].lower()
+        users = self.state.channel_users.get(channel)
+        if users:
+            users.pop(target, None)
+        if target == (self.state.current_nick or "").lower():
+            self.state.channels.pop(channel, None)
+            self.state.channel_users.pop(channel, None)
+
     def _handle_mode(self, msg: IrcMessage) -> None:
-        """Handle MODE."""
-        pass
+        """Handle MODE (only track +/-o/v for now)."""
+        if len(msg.params) < 3:
+            return
+        channel = msg.params[0].lower()
+        if not channel.startswith('#'):
+            return
+        modes = msg.params[1]
+        args = msg.params[2:]
+        users = self.state.channel_users.setdefault(channel, {})
+        idx = 0
+        adding = True
+        for c in modes:
+            if c == '+':
+                adding = True
+                continue
+            elif c == '-':
+                adding = False
+                continue
+            if c in ('o', 'v', 'h', 'a', 'q') and idx < len(args):
+                target = args[idx].lower()
+                idx += 1
+                if c == 'o':
+                    users[target] = '@' if adding else ''
+                elif c == 'v':
+                    users[target] = '+' if adding else ''
+                elif c == 'h':
+                    users[target] = '%' if adding else ''
+                elif c == 'a':
+                    users[target] = '&' if adding else ''
+                elif c == 'q':
+                    users[target] = '~' if adding else ''
+
+    def _channel_from_numeric(self, msg: IrcMessage, pos: int) -> Optional[str]:
+        """Extract channel from a numeric reply safely."""
+        if len(msg.params) > pos:
+            return msg.params[pos].lstrip(':').lower()
+        return None
 
     def _handle_namreply(self, msg: IrcMessage) -> None:
-        """Capture RPL_NAMREPLY (353) for later replay."""
-        if len(msg.params) < 4:
+        """Capture RPL_NAMREPLY (353) and update live user list."""
+        channel = self._channel_from_numeric(msg, 2)
+        if not channel:
             return
-        channel = msg.params[2].lstrip(':').lower()
         names = msg.trailing or ""
         self.state.channel_names.setdefault(channel, []).append(msg.raw)
-        # Update internal user list too.
+        users = self.state.channel_users.setdefault(channel, {})
         for nick in names.split():
-            if nick.startswith('@') or nick.startswith('+'):
+            prefix = ""
+            if nick.startswith('@'):
+                prefix = '@'
                 nick = nick[1:]
-            self.state.users[nick.lower()] = {'nick': nick, 'channels': {channel}}
+            elif nick.startswith('+'):
+                prefix = '+'
+                nick = nick[1:]
+            elif nick.startswith('%'):
+                prefix = '%'
+                nick = nick[1:]
+            elif nick.startswith('&'):
+                prefix = '&'
+                nick = nick[1:]
+            elif nick.startswith('~'):
+                prefix = '~'
+                nick = nick[1:]
+            if nick:
+                users[nick.lower()] = prefix
 
     def _handle_endofnames(self, msg: IrcMessage) -> None:
         """Capture RPL_ENDOFNAMES (366) for later replay."""
-        if len(msg.params) < 3:
+        channel = self._channel_from_numeric(msg, 1)
+        if not channel:
             return
-        channel = msg.params[2 - (len(msg.params) == 3)].lstrip(':').lower()
         self.state.channel_names.setdefault(channel, []).append(msg.raw)
 
     def _handle_channelmodeis(self, msg: IrcMessage) -> None:
         """Capture RPL_CHANNELMODEIS (324) for later replay."""
-        if len(msg.params) < 3:
+        channel = self._channel_from_numeric(msg, 1)
+        if not channel:
             return
-        channel = msg.params[2 - (len(msg.params) == 3)].lstrip(':').lower()
         self.state.channel_modes.setdefault(channel, []).append(msg.raw)
 
     def _handle_creationtime(self, msg: IrcMessage) -> None:
         """Capture RPL_CREATIONTIME (329) for later replay."""
-        if len(msg.params) < 3:
+        channel = self._channel_from_numeric(msg, 1)
+        if not channel:
             return
-        channel = msg.params[2 - (len(msg.params) == 3)].lstrip(':').lower()
         self.state.channel_modes.setdefault(channel, []).append(msg.raw)
 
     def _handle_whoreply(self, msg: IrcMessage) -> None:
         """Capture RPL_WHOREPLY (352) for later replay."""
-        if len(msg.params) < 7:
+        channel = self._channel_from_numeric(msg, 1)
+        if not channel:
             return
-        channel = msg.params[1].lstrip(':').lower()
         self.state.channel_who.setdefault(channel, []).append(msg.raw)
 
     def _handle_endofwho(self, msg: IrcMessage) -> None:
         """Capture RPL_ENDOFWHO (315) for later replay."""
-        if len(msg.params) < 3:
+        channel = self._channel_from_numeric(msg, 1)
+        if not channel:
             return
-        channel = msg.params[1].lstrip(':').lower()
         self.state.channel_who.setdefault(channel, []).append(msg.raw)
 
     def _on_connected(self) -> None:
@@ -468,6 +567,35 @@ class IrcClient:
     def get_channel_list(self) -> List[str]:
         """Get joined channels."""
         return list(self.state.channels.keys())
+
+    def build_names_list(self, channel: str) -> List[str]:
+        """Generate fresh 353/366 replies from the live channel user list.
+
+        Returns a list with one 353 line and one 366 line. If the channel is
+        unknown, returns empty list.
+        """
+        channel_lower = channel.lower()
+        users = self.state.channel_users.get(channel_lower, {})
+        if not users and channel_lower not in self.state.channels:
+            return []
+        server = self.state.server_name or "server"
+        nick = self.state.current_nick or "bnc"
+        # Build the names string, current nick first.
+        names = []
+        my_prefix = users.get(nick.lower(), "")
+        names.append(f"{my_prefix}{nick}")
+        for nick_lower, prefix in sorted(users.items()):
+            if nick_lower == nick.lower():
+                continue
+            # Use the original casing if known, otherwise lower.
+            display_nick = self.state.users.get(nick_lower, {}).get('nick') or nick_lower
+            names.append(f"{prefix}{display_nick}")
+        names_line = ' '.join(names)
+        chan_type = '='
+        return [
+            f":{server} 353 {nick} {chan_type} {channel} :{names_line}",
+            f":{server} 366 {nick} {channel} :End of /NAMES list.",
+        ]
 
     def is_connected(self) -> bool:
         """Check if connected to IRC."""

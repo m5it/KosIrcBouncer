@@ -323,7 +323,25 @@ class UserSession(threading.Thread):
 
             # Re-join channels the user had previously saved, plus channels the
             # upstream client is already in.
-            hostmask = client.state.hostmask or f"{client.state.current_nick}!user@host"
+            # Try to determine our real hostmask. Prefer the host field from a
+            # WHO reply for our own nick, otherwise fall back to the cached
+            # hostmask or a generic placeholder.
+            own_nick_lower = (client.state.current_nick or "").lower()
+            hostmask = client.state.hostmask
+            if not hostmask:
+                for channel in all_channels:
+                    for line in client.state.channel_who.get(channel.lower(), []):
+                        msg = IrcMessage.parse(line)
+                        if len(msg.params) >= 8 and msg.params[6].lower() == own_nick_lower:
+                            ident = msg.params[2]
+                            host = msg.params[3]
+                            hostmask = f"{client.state.current_nick}!{ident}@{host}"
+                            client.state.hostmask = hostmask
+                            break
+                    if hostmask:
+                        break
+            if not hostmask:
+                hostmask = f"{client.state.current_nick}!user@host"
             saved = self._get_saved_channels(network_name)
             irc_channels = set(client.get_channel_list())
             all_channels = irc_channels | saved
@@ -337,8 +355,11 @@ class UserSession(threading.Thread):
                 # This is exactly what HexChat expects after a JOIN.
                 for line in client.state.channel_modes.get(channel_lower, []):
                     self._send(line)
-                for line in client.state.channel_names.get(channel_lower, []):
+
+                # Send a fresh, live 353/366 names list for this channel.
+                for line in client.build_names_list(channel):
                     self._send(line)
+
                 for line in client.state.channel_who.get(channel_lower, []):
                     self._send(line)
         else:
