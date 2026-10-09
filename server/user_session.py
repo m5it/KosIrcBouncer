@@ -478,7 +478,12 @@ class UserSession(threading.Thread):
             self.selected_client._send(line)
 
     def _handle_whois(self, params: List[str], line: str) -> None:
-        """Handle WHOIS."""
+        """Handle WHOIS by forwarding to the IRC server."""
+        # Pass the raw WHOIS command through so the user receives real
+        # 311/312/313/317/318/330/671/etc. replies from the network.
+        if self.selected_client:
+            self.selected_client._send(line)
+            return
         if params:
             target = params[0].lstrip(':')
             self._send(f":server 311 {self.nick} {target} user host * :Real name")
