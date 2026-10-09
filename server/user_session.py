@@ -428,8 +428,9 @@ class UserSession(threading.Thread):
                 self._send(f":server NOTICE {self.nick} :Unknown BNC command: {subcmd}")
             return
 
-        # Use the full BncCommandHandler.
-        command_line = line[len('BNC '):].strip() if line.upper().startswith('BNC ') else ' '.join(params)
+        # Use the full BncCommandHandler.  It expects the raw line to start
+        # with 'BNC' and uses parts[1] as the actual subcommand.
+        command_line = line if line.upper().startswith('BNC') else 'BNC ' + ' '.join(params)
         for response in self.command_handler.handle(self, command_line):
             self._send(response)
 
