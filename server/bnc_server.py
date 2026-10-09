@@ -9,6 +9,8 @@ import time
 from typing import Dict, List, Optional
 from datetime import datetime
 
+import os
+
 from config import BncServerConfig
 from shared import UserDatabase, BufferManager
 from client import IrcClient
@@ -44,6 +46,14 @@ class BncServer:
         # Statistics
         self.start_time: Optional[datetime] = None
         self.total_connections = 0
+
+        # Command handler
+        self.command_handler = BncCommandHandler(
+            irc_clients,
+            user_db or UserDatabase(os.path.expanduser("~/.irc_bnc")),
+            buffer_manager,
+            self,
+        )
 
         # Setup SSL if configured
         if config.ssl_cert and config.ssl_key:
@@ -181,6 +191,7 @@ class BncServer:
             require_auth=self.config.require_auth,
             user_db=self.user_db,
             buffer_manager=self.buffer_manager,
+            command_handler=self.command_handler,
         )
         
         with self._lock:

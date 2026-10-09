@@ -23,7 +23,8 @@ class UserSession(threading.Thread):
                  irc_clients: Dict[str, IrcClient],
                  require_auth: bool = True,
                  user_db: Optional[UserDatabase] = None,
-                 buffer_manager=None):
+                 buffer_manager=None,
+                 command_handler=None):
         super().__init__(daemon=True)
 
         self.conn = conn
@@ -32,6 +33,7 @@ class UserSession(threading.Thread):
         self.require_auth = require_auth
         self.user_db = user_db
         self.buffer_manager = buffer_manager
+        self.command_handler = command_handler
 
         # Session state
         self.authenticated = False
@@ -409,22 +411,28 @@ class UserSession(threading.Thread):
     
     def _handle_bnc_command(self, params: List[str], line: str) -> None:
         """Handle BNC control commands."""
-        if not params:
+        if not self.command_handler:
+            # Fallback for sessions without a command handler
+            if not params:
+                return
+            subcmd = params[0].upper()
+            if subcmd == 'STATUS':
+                self._send_status()
+            elif subcmd == 'NETWORKS':
+                self._send_networks()
+            elif subcmd == 'CONNECT' and len(params) > 1:
+                self._attach_to_network(params[1])
+            elif subcmd == 'DISCONNECT':
+                self._detach_from_network()
+            else:
+                self._send(f":server NOTICE {self.nick} :Unknown BNC command: {subcmd}")
             return
-        
-        subcmd = params[0].upper()
-        
-        if subcmd == 'STATUS':
-            self._send_status()
-        elif subcmd == 'NETWORKS':
-            self._send_networks()
-        elif subcmd == 'CONNECT' and len(params) > 1:
-            self._attach_to_network(params[1])
-        elif subcmd == 'DISCONNECT':
-            self._detach_from_network()
-        else:
-            self._send(f":server NOTICE {self.nick} :Unknown BNC command: {subcmd}")
-    
+
+        # Use the full BncCommandHandler.
+        command_line = line[len('BNC '):].strip() if line.upper().startswith('BNC ') else ' '.join(params)
+        for response in self.command_handler.handle(self, command_line):
+            self._send(response)
+
     def _send_status(self) -> None:
         """Send BNC status."""
         self._send(f":server NOTICE {self.nick} :=== BNC Status ===")
@@ -432,7 +440,7 @@ class UserSession(threading.Thread):
         self._send(f":server NOTICE {self.nick} :Network: {self.current_network or 'None'}")
         self._send(f":server NOTICE {self.nick} :IRC Connected: {self.selected_client.is_connected() if self.selected_client else False}")
         self._send(f":server NOTICE {self.nick} :=================")
-    
+
     def _send_networks(self) -> None:
         """Send available networks."""
         self._send(f":server NOTICE {self.nick} :Available networks:")
@@ -440,7 +448,7 @@ class UserSession(threading.Thread):
             client = self.irc_clients[name]
             status = "connected" if client.is_connected() else "disconnected"
             self._send(f":server NOTICE {self.nick} :  {name} ({status})")
-    
+
     def _detach_from_network(self) -> None:
         """Detach from current network."""
         if self.selected_client:
