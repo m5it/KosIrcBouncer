@@ -323,6 +323,10 @@ class UserSession(threading.Thread):
 
             # Re-join channels the user had previously saved, plus channels the
             # upstream client is already in.
+            saved = self._get_saved_channels(network_name)
+            irc_channels = set(client.get_channel_list())
+            all_channels = irc_channels | saved
+
             # Try to determine our real hostmask. Prefer the host field from a
             # WHO reply for our own nick, otherwise fall back to the cached
             # hostmask or a generic placeholder.
@@ -342,9 +346,7 @@ class UserSession(threading.Thread):
                         break
             if not hostmask:
                 hostmask = f"{client.state.current_nick}!user@host"
-            saved = self._get_saved_channels(network_name)
-            irc_channels = set(client.get_channel_list())
-            all_channels = irc_channels | saved
+
             for channel in sorted(all_channels):
                 channel_lower = channel.lower()
                 if channel not in irc_channels:
