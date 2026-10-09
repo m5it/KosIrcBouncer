@@ -140,15 +140,17 @@ class UserSession(threading.Thread):
         # Track channel joins/parts even before full authentication so they
         # can be replayed or persisted after login.
         if cmd == 'JOIN' and not self.authenticated:
-            channel = parts[1].lstrip(':') if len(parts) > 1 else None
-            if channel:
-                self._save_channel(channel)
+            channels = parts[1].lstrip(':').split(',') if len(parts) > 1 else []
+            for channel in channels:
+                if channel:
+                    self._save_channel(channel)
             return
 
         if cmd == 'PART' and not self.authenticated:
-            channel = parts[1] if len(parts) > 1 else None
-            if channel:
-                self._remove_channel(channel)
+            channels = parts[1].split(',') if len(parts) > 1 else []
+            for channel in channels:
+                if channel:
+                    self._remove_channel(channel)
             return
         
         # Authenticated commands (BNC LOGIN and PASS may run before auth)
@@ -389,21 +391,25 @@ class UserSession(threading.Thread):
         if not params:
             return
 
-        channel = params[0].lstrip(':')
-        if self.selected_client:
-            self.selected_client.join_channel(channel)
-        self._save_channel(channel)
+        for channel in params[0].lstrip(':').split(','):
+            if not channel:
+                continue
+            if self.selected_client:
+                self.selected_client.join_channel(channel)
+            self._save_channel(channel)
 
     def _handle_part(self, params: List[str], line: str) -> None:
         """Handle PART."""
         if not params:
             return
 
-        channel = params[0]
-        reason = ' '.join(params[1:]).lstrip(':') if len(params) > 1 else ""
-        if self.selected_client:
-            self.selected_client.part_channel(channel, reason)
-        self._remove_channel(channel)
+        for channel in params[0].split(','):
+            if not channel:
+                continue
+            reason = ' '.join(params[1:]).lstrip(':') if len(params) > 1 else ""
+            if self.selected_client:
+                self.selected_client.part_channel(channel, reason)
+            self._remove_channel(channel)
     
     def _handle_privmsg(self, params: List[str], line: str) -> None:
         """Handle PRIVMSG."""
@@ -545,14 +551,18 @@ class UserSession(threading.Thread):
         account = self._get_user_account()
         if not account:
             return
-        channel = channel.lower()
-        if self.current_network:
-            network = self.current_network
-        elif len(self.irc_clients) == 1:
-            network = list(self.irc_clients.keys())[0]
-        else:
-            return
-        account.saved_channels.setdefault(network, set()).add(channel)
+        # Ensure each saved entry is a single channel, never a comma list.
+        for ch in channel.split(','):
+            ch = ch.strip().lower()
+            if not ch:
+                continue
+            if self.current_network:
+                network = self.current_network
+            elif len(self.irc_clients) == 1:
+                network = list(self.irc_clients.keys())[0]
+            else:
+                return
+            account.saved_channels.setdefault(network, set()).add(ch)
         self.user_db.save()
 
     def _remove_channel(self, channel: str) -> None:
@@ -560,14 +570,17 @@ class UserSession(threading.Thread):
         account = self._get_user_account()
         if not account:
             return
-        channel = channel.lower()
-        if self.current_network:
-            network = self.current_network
-        elif len(self.irc_clients) == 1:
-            network = list(self.irc_clients.keys())[0]
-        else:
-            return
-        account.saved_channels.get(network, set()).discard(channel)
+        for ch in channel.split(','):
+            ch = ch.strip().lower()
+            if not ch:
+                continue
+            if self.current_network:
+                network = self.current_network
+            elif len(self.irc_clients) == 1:
+                network = list(self.irc_clients.keys())[0]
+            else:
+                return
+            account.saved_channels.get(network, set()).discard(ch)
         self.user_db.save()
 
     def _detach_from_network(self) -> None:
