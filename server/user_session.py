@@ -122,19 +122,33 @@ class UserSession(threading.Thread):
         if cmd == 'PASS':
             self.password = ' '.join(parts[1:]).lstrip(':')
             return
-        
+
         if cmd == 'NICK':
             self.nick = parts[1] if len(parts) > 1 else None
             # If already authenticated, change nick on IRC too
             if self.authenticated and self.selected_client:
                 self.selected_client.change_nick(self.nick)
             return
-        
+
         if cmd == 'USER':
             if len(parts) >= 5:
                 self.username = parts[1]
                 self.realname = ' '.join(parts[4:]).lstrip(':')
             self._try_authenticate()
+            return
+
+        # Track channel joins/parts even before full authentication so they
+        # can be replayed or persisted after login.
+        if cmd == 'JOIN' and not self.authenticated:
+            channel = parts[1].lstrip(':') if len(parts) > 1 else None
+            if channel:
+                self._save_channel(channel)
+            return
+
+        if cmd == 'PART' and not self.authenticated:
+            channel = parts[1] if len(parts) > 1 else None
+            if channel:
+                self._remove_channel(channel)
             return
         
         # Authenticated commands (BNC LOGIN and PASS may run before auth)
@@ -279,13 +293,17 @@ class UserSession(threading.Thread):
         if not client:
             self._send(f":server NOTICE * :Network {network_name} not found")
             return
-        
+
+        # If already attached to this network, detach first so we reset state.
+        if self.current_network == network_name and self.selected_client is client:
+            self._detach_from_network()
+
         self.current_network = network_name
         self.selected_client = client
-        
+
         # Add callback for messages from IRC
         client.add_message_callback(self._on_irc_message)
-        
+
         # Send connection info
         if client.is_connected():
             # Replay the real registration burst (001/002/003/.../376/MOTD/
@@ -301,16 +319,37 @@ class UserSession(threading.Thread):
             # Play buffer
             self._send_buffer_playback(network_name)
 
-            # Send joined channels
-            for channel in client.get_channel_list():
+            # Re-join channels the user had previously saved, plus channels the
+            # upstream client is already in.
+            saved = self._get_saved_channels(network_name)
+            irc_channels = set(client.get_channel_list())
+            all_channels = irc_channels | saved
+            for channel in sorted(all_channels):
+                if channel not in irc_channels:
+                    client.join_channel(channel)
                 self._send(f":{client.state.current_nick}!user@host JOIN {channel}")
         else:
             self._send(f":server NOTICE * :Network {network_name} not connected")
-    
+
     def _send_buffer_playback(self, network: str) -> None:
-        """Send buffered messages to user."""
-        # TODO: Implement buffer playback
-        self._send(f":server NOTICE * :Buffer playback not yet implemented")
+        """Send buffered messages to user since their last detach/login."""
+        if not self.buffer_manager:
+            self._send(f":server NOTICE * :Buffer playback not available")
+            return
+
+        since = self.last_buffer_time
+        self.last_buffer_time = datetime.now()
+
+        buf = self.buffer_manager.get_buffer(network, "*")
+        entries = buf.get_since(since) if since else buf.get_last(100)
+
+        if not entries:
+            self._send(f":server NOTICE * :No buffered messages")
+            return
+
+        self._send(f":server NOTICE * :Replay {len(entries)} buffered message(s)")
+        for entry in entries:
+            self._send(entry.message)
     
     def _on_irc_message(self, msg: IrcMessage) -> None:
         """Handle message from IRC network."""
@@ -338,20 +377,22 @@ class UserSession(threading.Thread):
         """Handle JOIN."""
         if not params:
             return
-        
+
         channel = params[0].lstrip(':')
         if self.selected_client:
             self.selected_client.join_channel(channel)
-    
+        self._save_channel(channel)
+
     def _handle_part(self, params: List[str], line: str) -> None:
         """Handle PART."""
         if not params:
             return
-        
+
         channel = params[0]
         reason = ' '.join(params[1:]).lstrip(':') if len(params) > 1 else ""
         if self.selected_client:
             self.selected_client.part_channel(channel, reason)
+        self._remove_channel(channel)
     
     def _handle_privmsg(self, params: List[str], line: str) -> None:
         """Handle PRIVMSG."""
@@ -450,11 +491,64 @@ class UserSession(threading.Thread):
             status = "connected" if client.is_connected() else "disconnected"
             self._send(f":server NOTICE {self.nick} :  {name} ({status})")
 
+    def _get_user_account(self):
+        """Return the configured user account for this session, if any."""
+        if not self.user_db or not self.username:
+            return None
+        return self.user_db.get_user(self.username)
+
+    def _get_saved_channels(self, network: str):
+        """Return the set of channels the user has saved for a network."""
+        account = self._get_user_account()
+        if not account:
+            return set()
+        return account.saved_channels.get(network, set())
+
+    def _save_channel(self, channel: str) -> None:
+        """Persist a channel in the user's saved channel list."""
+        account = self._get_user_account()
+        if not account:
+            return
+        channel = channel.lower()
+        if self.current_network:
+            network = self.current_network
+        elif len(self.irc_clients) == 1:
+            network = list(self.irc_clients.keys())[0]
+        else:
+            return
+        account.saved_channels.setdefault(network, set()).add(channel)
+        self.user_db.save()
+
+    def _remove_channel(self, channel: str) -> None:
+        """Remove a channel from the user's saved channel list."""
+        account = self._get_user_account()
+        if not account:
+            return
+        channel = channel.lower()
+        if self.current_network:
+            network = self.current_network
+        elif len(self.irc_clients) == 1:
+            network = list(self.irc_clients.keys())[0]
+        else:
+            return
+        account.saved_channels.get(network, set()).discard(channel)
+        self.user_db.save()
+
     def _detach_from_network(self) -> None:
         """Detach from current network."""
         if self.selected_client:
+            # Remove our message callback so traffic is buffered instead of
+            # being relayed to a disconnected client.
+            try:
+                self.selected_client._on_message = [
+                    cb for cb in self.selected_client._on_message
+                    if cb != self._on_irc_message
+                ]
+            except Exception:
+                pass
             self.selected_client = None
             self.current_network = None
+            self.last_buffer_time = datetime.now()
             self._send(f":server NOTICE {self.nick} :Detached from network")
     
     def _should_ping(self) -> bool:

@@ -206,6 +206,11 @@ class IrcClient:
         if not self.state.registered:
             self.state.registration_burst.append(msg.raw)
 
+        # Buffer important numerics for later replay (topic, names, motd,
+        # server info, etc.) regardless of registration state.
+        if msg.raw and code not in (1, 2, 3, 4, 5, 251, 252, 253, 254, 255, 265, 266, 372, 375, 376):
+            self._buffer_message(msg.raw, "numeric")
+
         if code == 1:  # RPL_WELCOME
             self.state.registered = True
             print(f"[IRC] Connected as {self.state.current_nick}")
@@ -226,6 +231,10 @@ class IrcClient:
         # e.g. NickServ "This nickname is registered."
         if msg.command == 'NOTICE' and not self.state.registered:
             self.state.registration_burst.append(msg.raw)
+
+        # Buffer non-registration traffic for detached clients.
+        if msg.raw and msg.command not in ('PING', 'PONG'):
+            self._buffer_message(msg.raw, msg.command.lower())
 
         handlers = {
             'PING': self._handle_ping,
@@ -352,30 +361,30 @@ class IrcClient:
     def send_action(self, target: str, action: str) -> None:
         """Send CTCP ACTION."""
         self._send(f"PRIVMSG {target} :\x01ACTION {action}\x01")
-    
+
     def change_nick(self, new_nick: str) -> None:
         """Change nickname."""
         self._send(f"NICK {new_nick}")
-    
+
     def set_away(self, message: Optional[str]) -> None:
         """Set away status."""
         if message:
             self._send(f"AWAY :{message}")
         else:
             self._send("AWAY")
-    
+
     def get_channel_list(self) -> List[str]:
         """Get joined channels."""
         return list(self.state.channels.keys())
-    
+
     def is_connected(self) -> bool:
         """Check if connected to IRC."""
         return self.state.registered and self.connection.is_connected()
-    
+
     def add_message_callback(self, callback: Callable[[IrcMessage], None]) -> None:
         """Add message callback."""
         self._on_message.append(callback)
-    
+
     def get_stats(self) -> dict:
         """Get client statistics."""
         stats = self.connection.get_stats()
@@ -386,3 +395,33 @@ class IrcClient:
             'channels': len(self.state.channels)
         })
         return stats
+
+    def _buffer_message(self, raw_line: str, msg_type: str = "text") -> None:
+        """Store a raw IRC line in the global message buffer.
+
+        The buffer is keyed by network and a synthetic '*' target so that all
+        traffic received while the user is detached can be replayed on attach.
+        Per-channel/query copies are kept as well for targeted playback.
+        """
+        # Global network buffer for full replay
+        self.buffer.add_message(
+            network=self.config.name,
+            target="*",
+            message=raw_line,
+            msg_type=msg_type,
+        )
+
+        # Also store in the specific channel/query buffer when possible.
+        target = None
+        parts = raw_line.split()
+        if len(parts) >= 3 and parts[1].upper() in (
+            'PRIVMSG', 'NOTICE', 'JOIN', 'PART', 'MODE', 'KICK', 'TOPIC'
+        ):
+            target = parts[2].lstrip(':').lower()
+        if target and target.startswith('#'):
+            self.buffer.add_message(
+                network=self.config.name,
+                target=target,
+                message=raw_line,
+                msg_type=msg_type,
+            )

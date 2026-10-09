@@ -55,6 +55,7 @@ class UserAccount:
     locked_until: Optional[datetime] = None
     allowed_networks: Set[str] = field(default_factory=set)
     allowed_ips: Set[str] = field(default_factory=set)  # CIDR notation
+    saved_channels: Dict[str, Set[str]] = field(default_factory=dict)  # network -> channels
     
     def check_password(self, password: str) -> bool:
         """Verify password."""
@@ -116,7 +117,11 @@ class UserDatabase:
                         password_hash=user_data['password_hash'],
                         is_admin=user_data.get('is_admin', False),
                         allowed_networks=set(user_data.get('allowed_networks', [])),
-                        allowed_ips=set(user_data.get('allowed_ips', []))
+                        allowed_ips=set(user_data.get('allowed_ips', [])),
+                        saved_channels={
+                            net: set(chans)
+                            for net, chans in user_data.get('saved_channels', {}).items()
+                        }
                     )
         except Exception as e:
             print(f"[Auth] Failed to load users: {e}")
@@ -136,7 +141,10 @@ class UserDatabase:
                 'password_hash': user.password_hash,
                 'is_admin': user.is_admin,
                 'allowed_networks': list(user.allowed_networks),
-                'allowed_ips': list(user.allowed_ips)
+                'allowed_ips': list(user.allowed_ips),
+                'saved_channels': {
+                    net: list(chans) for net, chans in user.saved_channels.items()
+                },
             }
         
         with open(filepath, 'w') as f:
