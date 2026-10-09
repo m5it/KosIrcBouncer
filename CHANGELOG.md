@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Real IRC session replay on attach**: When an IRC client reconnects, the BNC now replays the upstream server's actual registration burst (001, 002, 003, MOTD, NickServ notices, etc.) instead of fake BNC welcome messages.
+- **Persistent channels**: Channels joined by the user are saved per-network in `users.json` and automatically rejoined on the next login.
+- **Live channel state replay**: Re-joining a channel replays channel modes, creation time, a freshly generated `353 RPL_NAMREPLY`/`366 RPL_ENDOFNAMES` user list, and cached `352 RPL_WHOREPLY`/`315 RPL_ENDOFWHO` replies.
+- **Live channel user tracking**: `IrcClient` now maintains per-channel user lists updated from `JOIN`, `PART`, `QUIT`, `KICK`, `NICK` and `MODE +/-o/v/h/a/q` events.
+- **Message buffering**: All IRC traffic received while the user is detached is buffered and replayed when the user re-attaches.
+- **`/BNC LOGIN <username> <password>` command**: Manual BNC authentication for clients that do not send a server password.
+- **`generate_hashed_password.py` helper**: Convenient script to produce PBKDF2 password hashes for `config.json`.
 - **IPv6 Support**: Full dual-stack IPv4/IPv6 support for IRC connections
   - Automatic address resolution using `socket.getaddrinfo()` for both IPv4 and IPv6
   - Automatic fallback from IPv6 to IPv4 when IPv6 is unavailable
@@ -19,8 +26,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Configuration**: Default `bind_host` in `BncServerConfig` changed from `"0.0.0.0"` to `"::"` to enable dual-stack support by default
 - **Connection handling**: Improved connection resilience with multiple address family attempts
+- **Authentication**: User accounts from `config.json` are now loaded into `UserDatabase` at startup and used to validate `PASS` and `/BNC LOGIN`.
+- **Channel metadata handling**: Per-channel numerics (324/329/352/353/366/315) are no longer buffered globally, preventing duplication and preserving correct message order on replay.
+
+### Fixed
+- Fixed `/NAMES` re-attach to include `366 RPL_ENDOFNAMES`.
+- Fixed comma-separated `JOIN #chan1,#chan2` being stored as a single corrupted channel name.
+- Fixed `BNC LOGIN` being rejected before authentication.
+- Fixed `WHO`/`MODE` pass-through so the IRC client receives live server replies.
 
 ### Technical Details
+- Added `registration_burst`, `channel_users`, `channel_names`, `channel_who`, `channel_modes` and `hostmask` to `IrcState`.
+- Added `saved_channels` to `UserAccount` for persistent channel storage.
+- Implemented `IrcClient.build_names_list()` to generate fresh `353/366` replies from the live tracked user list.
+- Updated `UserSession` to delegate all `/BNC` commands through `BncCommandHandler`.
 - Modified `IrcConnection` class to use `socket.getaddrinfo()` instead of hardcoded `AF_INET`
 - Added `_addr_family` tracking to connection statistics
 - Added dual-stack socket option setting for IPv6 sockets
@@ -32,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release of IRC BNC
 - Multi-network support
 - Persistent connections
-- Message buffering
+- Basic message buffering
 - Web dashboard
 - SSL/TLS support
 - User authentication

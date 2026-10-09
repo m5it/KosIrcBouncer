@@ -1,16 +1,17 @@
 # IRC BNC - IRC Bouncer System
 
-A complete IRC bouncer with client-server architecture. Connect your IRC client (HexChat, irssi, etc.) to the BNC, and the BNC maintains persistent connections to IRC networks.
+A complete IRC bouncer with client-server architecture. Connect your IRC client (HexChat, irssi, weechat, etc.) to the BNC, and the BNC maintains persistent connections to IRC networks on your behalf.
 
 ## Features
 
 - **Multi-Network Support**: Connect to multiple IRC networks simultaneously (Libera, EFnet, OFTC, etc.)
 - **IPv6 Support**: Full dual-stack IPv4/IPv6 support for connecting to modern IRC networks
-- **Persistent Connections**: Bot stays connected when you disconnect
-- **Message Buffering**: Full playback of missed messages when you reconnect
+- **Persistent Connections**: The bot stays connected to IRC while your client is offline
+- **Message Buffering**: Full playback of missed channel/query traffic when you reconnect
+- **Channel State Replay**: Rejoins saved channels, restores user lists, modes and topics on re-attachment
 - **Web Dashboard**: Real-time monitoring and web-based IRC client
 - **SSL/TLS Support**: Encrypted connections to IRC and BNC
-- **Authentication**: Secure user management with hashed passwords
+- **Authentication**: Secure user management with PBKDF2-hashed passwords
 - **Admin Commands**: Full control via `/BNC` commands
 
 ## Architecture
@@ -83,10 +84,16 @@ Create `config.json` in the project root:
 
 Passwords must be **pre-hashed** before being placed in `config.json`. Do **not** write plain-text passwords in the config file.
 
-Generate a password hash using the built-in hasher:
+Generate a password hash using the helper script:
 
 ```bash
-python -c "from shared.auth import PasswordHasher; print(PasswordHasher.hash('yourpassword'))"
+python generate_hashed_password.py yourpassword
+```
+
+Or interactively:
+
+```bash
+python generate_hashed_password.py
 ```
 
 Example output:
@@ -111,29 +118,45 @@ When connecting with your IRC client, use the **plain password** (the original `
 
 1. Open HexChat
 2. Add new server: `/server add BNC localhost/6667`
-3. Connect: `/connect BNC`
-4. Authenticate:
-   ```
-   /PASS yourpassword
-   /NICK YourNick
-   /USER yourusername 0 * :Real Name
-   ```
+3. Set the server password to your plain BNC password (Network list → Edit → Server password)
+4. Connect: `/connect BNC`
+5. The BNC will authenticate you automatically and attach to the configured IRC network.
+
+You can also authenticate manually after connecting without a server password:
+
+```
+/BNC LOGIN yourusername yourpassword
+```
 
 ## BNC Commands
 
 | Command | Description |
 |---------|-------------|
-| `/BNC CONNECT <network>` | Connect to IRC network |
+| `/BNC LOGIN <username> <password>` | Authenticate with the BNC |
+| `/BNC CONNECT <network>` | Attach to an IRC network |
 | `/BNC DISCONNECT` | Disconnect from current network |
 | `/BNC STATUS` | Show connection status |
 | `/BNC JUMP` | Reconnect to server |
 | `/BNC SAY <target> <msg>` | Send message as bot |
-| `/BNC RAW <command>` | Send raw IRC command |
-| `/BNC DETACH` | Detach (bot continues) |
+| `/BNC RAW <command>` | Send raw IRC command to IRC server |
+| `/BNC DETACH` | Detach (bot continues running) |
 | `/BNC ATTACH` | Reattach to session |
 | `/BNC NETWORKS` | List available networks |
-| `/BNC ADDUSER <user> <pass>` | Add user (admin) |
+| `/BNC ADDUSER <user> <pass> [admin]` | Add user (admin) |
+| `/BNC DELUSER <user>` | Delete user (admin) |
 | `/BNC LISTUSERS` | List users (admin) |
+| `/BNC SETPASS <user> <password>` | Change user password (admin) |
+
+## Persistent Channels and Replay
+
+When you `/JOIN` a channel through the BNC, the channel is saved to your user account. When you log back in later:
+
+- The BNC automatically rejoins your saved channels
+- The original IRC server registration burst (001, 002, 003, MOTD, etc.) is replayed
+- Channel modes, topics and live user lists are replayed
+- Missed channel messages and notices are replayed from the buffer
+
+Channels you `/PART` are removed from your saved list automatically.
 
 ## Web Dashboard
 
