@@ -34,6 +34,7 @@ class IrcConnection:
         self.bytes_sent = 0
         self.bytes_received = 0
         self.connect_time: Optional[datetime] = None
+        self.last_activity: float = 0.0
     
     def connect(self) -> bool:
         """Establish connection to IRC server."""
@@ -78,21 +79,22 @@ class IrcConnection:
                     # Connect
                     self.socket.connect(sockaddr)
                     self.socket.settimeout(None)  # Non-blocking for select
-                    
+
                     self.connected = True
                     self.connect_time = datetime.now()
-                    
+                    self.last_activity = time.time()
+
                     # Start receive thread
                     self.receiving = True
                     self.receive_thread = threading.Thread(target=self._receive_loop)
                     self.receive_thread.daemon = True
                     self.receive_thread.start()
-                    
+
                     # Store the address family for stats
                     self._addr_family = family
-                    
+
                     return True
-                    
+
                 except Exception as e:
                     last_error = e
                     if sock:
@@ -133,20 +135,21 @@ class IrcConnection:
         """Send raw IRC message."""
         if not self.connected or not self.socket:
             return False
-        
+
         try:
             # Ensure CRLF termination
             if not message.endswith('\r\n'):
                 message += '\r\n'
-            
+
             data = message.encode('utf-8', errors='replace')
-            
+
             with self._lock:
                 self.socket.sendall(data)
                 self.bytes_sent += len(data)
-            
+                self.last_activity = time.time()
+
             return True
-            
+
         except Exception as e:
             print(f"[ERROR] Send failed: {e}")
             self.disconnect()
@@ -165,16 +168,18 @@ class IrcConnection:
                 
                 buffer += data.decode('utf-8', errors='replace')
                 self.bytes_received += len(data)
-                
+                self.last_activity = time.time()
+
                 # Process complete lines
                 while '\r\n' in buffer:
                     line, buffer = buffer.split('\r\n', 1)
                     self._handle_line(line)
-                
+
             except Exception as e:
-                if self.receiving:
-                    print(f"[ERROR] Receive error: {e}")
-                break
+                    if self.receiving:
+                        print(f"[ERROR] Receive error: {e}")
+                    break
+
         
         self.connected = False
         self.receiving = False

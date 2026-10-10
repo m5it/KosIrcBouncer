@@ -30,10 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Channel metadata handling**: Per-channel numerics (324/329/352/353/366/315) are no longer buffered globally, preventing duplication and preserving correct message order on replay.
 
 ### Fixed
+- Fixed upstream IRC reconnect after ping timeout: `IrcConnection` is now recreated on every reconnect and the IRC client sends keepalive PINGs / detects dead connections after 180s of inactivity.
 - Fixed `/NAMES` re-attach to include `366 RPL_ENDOFNAMES`.
 - Fixed comma-separated `JOIN #chan1,#chan2` being stored as a single corrupted channel name.
 - Fixed `BNC LOGIN` being rejected before authentication.
 - Fixed `WHO`/`MODE` pass-through so the IRC client receives live server replies.
+- Fixed `WHOIS` to forward to the IRC server and return real replies.
 
 ### Technical Details
 - Added `registration_burst`, `channel_users`, `channel_names`, `channel_who`, `channel_modes` and `hostmask` to `IrcState`.

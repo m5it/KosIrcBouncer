@@ -72,6 +72,8 @@ class IrcClient:
         # Auto-reconnect
         self._reconnect_attempts = 0
         self._max_reconnect_delay = 300  # 5 minutes
+        self._last_server_pong = 0.0
+        self._last_sent_ping = 0.0
     
     def start(self) -> None:
         """Start IRC client in background thread."""
@@ -113,38 +115,47 @@ class IrcClient:
     def _connect_and_run(self) -> bool:
         """Connect and handle IRC session."""
         # Reset state
+        # Reset state and create a fresh connection object so reconnects start
+        # from a clean socket.
         self.state = IrcState()
         self.state.nick = self.config.nick
         self.state.current_nick = self.config.nick
-        
+        self.connection = IrcConnection(
+            host=self.config.host,
+            port=self.config.port,
+            use_ssl=self.config.ssl,
+        )
+        self._last_server_pong = time.time()
+        self._last_sent_ping = 0.0
+
         # Connect
         print(f"[IRC] Connecting to {self.config.host}:{self.config.port}...")
         if not self.connection.connect():
             return False
-        
+
         # Add callback for incoming messages
         self.connection.add_callback(self._on_raw_message)
-        
+
         # Send registration
         self._send_registration()
-        
+
         # Wait for connection to complete/fail
         timeout = 60
         start = time.time()
         while self._running and self.connection.is_connected():
             if self.state.registered:
-                # Connected successfully
+                # Connected successfully - keep running and maintain keepalive
                 self._on_connected()
-                # Keep running until disconnect
                 while self._running and self.connection.is_connected():
-                    time.sleep(0.1)
+                    self._maintain_keepalive()
+                    time.sleep(0.5)
                 return True
-            
+
             if time.time() - start > timeout:
                 print("[IRC] Registration timeout")
                 break
             time.sleep(0.1)
-        
+
         self.connection.disconnect()
         return False
     
@@ -297,9 +308,26 @@ class IrcClient:
             handler(msg)
     
     def _handle_ping(self, msg: IrcMessage) -> None:
-        """Respond to PING."""
-        if msg.trailing:
-            self._send(f"PONG :{msg.trailing}")
+        """Respond to server PING."""
+        payload = msg.trailing or (msg.params[0] if msg.params else "")
+        if payload:
+            self._send(f"PONG :{payload}")
+
+    def _maintain_keepalive(self) -> None:
+        """Send periodic PING to the IRC server and detect dead connections."""
+        now = time.time()
+        # Any incoming traffic (including PONG) counts as activity.
+        if not hasattr(self.connection, 'last_activity') or self.connection.last_activity <= 0:
+            self.connection.last_activity = now
+        # If we haven't received anything for 60 seconds, send a PING.
+        if now - self.connection.last_activity > 60 and now - self._last_sent_ping > 30:
+            self._send(f"PING :{int(now)}")
+            self._last_sent_ping = now
+        # If we haven't seen any traffic for 180 seconds, consider the
+        # connection dead and force a reconnect.
+        if now - self.connection.last_activity > 180:
+            print("[IRC] Keepalive timeout, forcing reconnect")
+            self.connection.disconnect()
     
     def _handle_privmsg(self, msg: IrcMessage) -> None:
         """Handle PRIVMSG."""
