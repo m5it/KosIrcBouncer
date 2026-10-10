@@ -105,19 +105,25 @@ class UserAccount:
         m_ident, m_host = rest.split('@', 1)
 
         def wc_match(pattern: str, text: str) -> bool:
+            pattern = pattern.lower()
+            text = text.lower()
             if pattern == '*':
                 return True
+            if '*' not in pattern:
+                return pattern == text
             # Simple * wildcard matching.
-            parts = pattern.lower().split('*')
-            if parts[0] and not text.lower().startswith(parts[0]):
+            parts = pattern.split('*')
+            # If pattern does not start with *, text must start with first part.
+            if parts[0] and not text.startswith(parts[0]):
                 return False
-            if parts[-1] and not text.lower().endswith(parts[-1]):
+            # If pattern does not end with *, text must end with last part.
+            if parts[-1] and not text.endswith(parts[-1]):
                 return False
             pos = 0
             for part in parts:
                 if not part:
                     continue
-                idx = text.lower().find(part, pos)
+                idx = text.find(part, pos)
                 if idx == -1:
                     return False
                 pos = idx + len(part)

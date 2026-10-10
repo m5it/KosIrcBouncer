@@ -642,14 +642,18 @@ class IrcClient:
     def _check_auto_op(self, channel: str, nick: str, ident: str, host: str) -> None:
         """Send MODE +o if the user matches any registered auto-op mask."""
         from shared.auth import UserAccount
+        channel_lower = channel.lower()
         with self._auto_op_lock:
-            masks = list(self._auto_op_masks.get(channel.lower(), set()))
+            masks = list(self._auto_op_masks.get(channel_lower, set()))
+        print(f"[IRC] auto-op check: {nick}!{ident}@{host} on {channel} masks={masks}")
         if not masks:
             return
         for mask in masks:
-            if UserAccount.mask_matches(mask, nick, ident, host):
+            match = UserAccount.mask_matches(mask, nick, ident, host)
+            print(f"[IRC] auto-op mask={mask} match={match}")
+            if match:
+                print(f"[IRC] Auto-op: sending MODE {channel} +o {nick}")
                 self._send(f"MODE {channel} +o {nick}")
-                print(f"[IRC] Auto-op given to {nick} on {channel} (mask {mask})")
                 return
 
     def build_names_list(self, channel: str) -> List[str]:

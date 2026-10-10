@@ -398,6 +398,7 @@ class UserSession(threading.Thread):
             return
         channel_lower = channel.lower()
         masks = account.get_auto_op_masks(network_name, channel)
+        print(f"[BNC] apply auto-op on re-attach for {channel} masks={masks}")
         if not masks:
             return
         for nick_lower, user_info in client.state.users.items():
@@ -405,9 +406,13 @@ class UserSession(threading.Thread):
             ident = user_info.get('ident')
             host = user_info.get('host')
             if not nick or not ident or not host:
+                print(f"[BNC] auto-op skip {nick_lower}: missing ident/host")
                 continue
             for mask in masks:
-                if account.mask_matches(mask, nick, ident, host):
+                match = account.mask_matches(mask, nick, ident, host)
+                print(f"[BNC] auto-op check {nick}!{ident}@{host} vs {mask} = {match}")
+                if match:
+                    print(f"[BNC] Auto-op: sending MODE {channel} +o {nick}")
                     client._send(f"MODE {channel} +o {nick}")
                     break
 
