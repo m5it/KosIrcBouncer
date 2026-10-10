@@ -549,12 +549,13 @@ class IrcClient:
 
     def _handle_whoreply(self, msg: IrcMessage) -> None:
         """Capture RPL_WHOREPLY (352) for later replay."""
+        # Format: :server 352 <client> <channel> <ident> <host> <server> <nick> <status> :<hopcount> <realname>
         if len(msg.params) < 7:
             return
         channel = msg.params[1].lstrip(':').lower()
         self.state.channel_who.setdefault(channel, []).append(msg.raw)
         # Store ident/host for auto-op matching.
-        nick = msg.params[6].lstrip(':')
+        nick = msg.params[5].lstrip(':')
         ident = msg.params[2]
         host = msg.params[3]
         self.state.users[nick.lower()] = {
