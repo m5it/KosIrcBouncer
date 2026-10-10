@@ -339,7 +339,8 @@ class UserSession(threading.Thread):
                 for channel in all_channels:
                     for line in client.state.channel_who.get(channel.lower(), []):
                         msg = IrcMessage.parse(line)
-                        if len(msg.params) >= 8 and msg.params[6].lower() == own_nick_lower:
+                        # WHO reply: client channel ident host server nick status :hops realname
+                        if len(msg.params) >= 7 and msg.params[5].lower() == own_nick_lower:
                             ident = msg.params[2]
                             host = msg.params[3]
                             hostmask = f"{client.state.current_nick}!{ident}@{host}"

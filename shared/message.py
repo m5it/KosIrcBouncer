@@ -67,6 +67,15 @@ class IrcMessage:
         return self.prefix if self.prefix else None
     
     @property
+    def ident(self) -> Optional[str]:
+        """Extract ident from prefix (nick!ident@host)."""
+        if self.prefix and '!' in self.prefix:
+            parts = self.prefix.split('!')
+            if len(parts) > 1 and '@' in parts[1]:
+                return parts[1].split('@')[0]
+        return None
+
+    @property
     def host(self) -> Optional[str]:
         """Extract host from prefix."""
         if self.prefix and '!' in self.prefix:

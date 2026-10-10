@@ -377,6 +377,16 @@ class IrcClient:
             return
         channel_lower = channel.lower()
 
+        # Extract full hostmask from the message prefix: nick!ident@host
+        ident = msg.ident or ""
+        host = msg.host or ""
+        if nick and ident and host:
+            self.state.users[nick.lower()] = {
+                'nick': nick,
+                'ident': ident,
+                'host': host,
+            }
+
         if nick == self.state.current_nick:
             self.state.channels[channel_lower] = {
                 'name': channel,
@@ -389,18 +399,11 @@ class IrcClient:
             self.state.channel_modes[channel_lower] = []
             self.state.channel_users[channel_lower] = {}
             print(f"[IRC] Joined {channel}")
-            # Request WHO so we get hostmasks for auto-op decisions.
-            with self._auto_op_lock:
-                has_masks = bool(self._auto_op_masks.get(channel_lower))
-            if has_masks:
-                self._send(f"WHO {channel}")
         else:
             self.state.channel_users.setdefault(channel_lower, {})[nick.lower()] = ""
-            # If we have auto-op masks, look up the joining user's host.
-            with self._auto_op_lock:
-                has_masks = bool(self._auto_op_masks.get(channel_lower))
-            if has_masks:
-                self._send(f"WHO {nick}")
+            # Auto-op immediately if the joining user's hostmask matches.
+            if ident and host:
+                self._check_auto_op(channel_lower, nick, ident, host)
 
     def _handle_part(self, msg: IrcMessage) -> None:
         """Handle PART."""
@@ -558,12 +561,22 @@ class IrcClient:
         nick = msg.params[5].lstrip(':')
         ident = msg.params[2]
         host = msg.params[3]
-        self.state.users[nick.lower()] = {
+        nick_lower = nick.lower()
+        self.state.users[nick_lower] = {
             'nick': nick,
             'ident': ident,
             'host': host,
         }
-        self._check_auto_op(channel, nick, ident, host)
+
+        # Some WHO replies (for example from a client-requested `WHO <nick>`)
+        # report channel as "*".  In that case check every channel this nick
+        # is known to be in for auto-op masks.
+        if channel and channel.startswith('#'):
+            self._check_auto_op(channel, nick, ident, host)
+        else:
+            for ch, users in self.state.channel_users.items():
+                if nick_lower in users:
+                    self._check_auto_op(ch, nick, ident, host)
 
     def _handle_endofwho(self, msg: IrcMessage) -> None:
         """Capture RPL_ENDOFWHO (315) for later replay."""

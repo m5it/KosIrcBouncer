@@ -98,38 +98,15 @@ class UserAccount:
 
     @staticmethod
     def mask_matches(mask: str, nick: str, ident: str, host: str) -> bool:
-        """Check if nick!ident@host matches a wildcard mask."""
+        """Check if nick!ident@host matches a wildcard mask.
+
+        Supports shell-style wildcards (*, ?) in any part of the mask.
+        """
+        import fnmatch
         if '!' not in mask or '@' not in mask:
             return False
-        m_nick, rest = mask.split('!', 1)
-        m_ident, m_host = rest.split('@', 1)
-
-        def wc_match(pattern: str, text: str) -> bool:
-            pattern = pattern.lower()
-            text = text.lower()
-            if pattern == '*':
-                return True
-            if '*' not in pattern:
-                return pattern == text
-            # Simple * wildcard matching.
-            parts = pattern.split('*')
-            # If pattern does not start with *, text must start with first part.
-            if parts[0] and not text.startswith(parts[0]):
-                return False
-            # If pattern does not end with *, text must end with last part.
-            if parts[-1] and not text.endswith(parts[-1]):
-                return False
-            pos = 0
-            for part in parts:
-                if not part:
-                    continue
-                idx = text.find(part, pos)
-                if idx == -1:
-                    return False
-                pos = idx + len(part)
-            return True
-
-        return wc_match(m_nick, nick) and wc_match(m_ident, ident) and wc_match(m_host, host)
+        full = f"{nick}!{ident}@{host}"
+        return fnmatch.fnmatchcase(full.lower(), mask.lower())
 
 
 class UserDatabase:

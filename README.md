@@ -146,6 +146,9 @@ You can also authenticate manually after connecting without a server password:
 | `/BNC DELUSER <user>` | Delete user (admin) |
 | `/BNC LISTUSERS` | List users (admin) |
 | `/BNC SETPASS <user> <password>` | Change user password (admin) |
+| `/BNC AUTOOP ADD #channel nick!user@host` | Add auto-op mask for a channel |
+| `/BNC AUTOOP DEL #channel nick!user@host` | Remove auto-op mask from a channel |
+| `/BNC AUTOOP LIST [#channel]` | List configured auto-op masks |
 
 ## Persistent Channels and Replay
 
@@ -157,6 +160,26 @@ When you `/JOIN` a channel through the BNC, the channel is saved to your user ac
 - Missed channel messages and notices are replayed from the buffer
 
 Channels you `/PART` are removed from your saved list automatically.
+
+## Auto-Op
+
+The BNC can automatically op users when they join a channel based on hostmask
+masks. Masks are stored per channel and support shell-style wildcards (`*`, `?`).
+
+Examples:
+
+```irc
+/BNC AUTOOP ADD #grandekos.com realt3ch!~bnc@vmi3205629.contaboserver.net
+/BNC AUTOOP ADD #grandekos.com *!*@vmi3205629.contaboserver.net
+/BNC AUTOOP ADD #grandekos.com realt3ch!*@vmi3205629.contaboserver.net
+```
+
+Notes:
+
+- Libera (and most networks) report an ident with a leading `~` for users that do not run an identd server, e.g. `~bnc`. Masks like `realt3ch!bnc@...` will **not** match; use `realt3ch!~bnc@...` or `realt3ch!*@...` instead.
+- Auto-op is checked immediately when a user JOINs a channel, using the hostmask in the JOIN message's prefix.
+- Auto-op is also checked when a NAMES or WHO reply fills in a user's hostmask (e.g. during the BNC's own channel join or a client-requested `/names`).
+- The BNC does not send extra WHO requests for auto-op; it only uses hostmasks already available from normal IRC traffic.
 
 ## Web Dashboard
 

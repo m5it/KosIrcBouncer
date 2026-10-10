@@ -36,10 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed `BNC LOGIN` being rejected before authentication.
 - Fixed `WHO`/`MODE` pass-through so the IRC client receives live server replies.
 - Fixed `WHOIS` to forward to the IRC server and return real replies.
+- Fixed auto-op for users joining after the BNC is already in a channel by using the hostmask directly from the JOIN message prefix instead of waiting for WHO replies.
+- Fixed auto-op handling of WHO replies with channel `*`: the BNC now checks every channel the nick is known to be in when the reply channel is not a real channel name.
+- Fixed re-attach hostmask detection using the wrong `WHO` reply parameter for the user's own nick (status field was used instead of the nick field).
+- Fixed wildcard matching in auto-op masks by replacing the hand-rolled matcher with `fnmatch.fnmatchcase`, correctly supporting `*`, `?` and multi-part wildcards such as `realt3ch!*@*.example.com`.
+- Removed proactive `WHO` requests from auto-op: the BNC no longer sends extra WHO traffic; it relies on hostmasks already present in normal IRC traffic (JOIN prefixes, NAMES, client-requested WHO).
 
 ### Technical Details
 - Added `registration_burst`, `channel_users`, `channel_names`, `channel_who`, `channel_modes` and `hostmask` to `IrcState`.
-- Added `saved_channels` to `UserAccount` for persistent channel storage.
+- Added `saved_channels` and `auto_op` to `UserAccount` for persistent channel storage and auto-op masks.
 - Implemented `IrcClient.build_names_list()` to generate fresh `353/366` replies from the live tracked user list.
 - Updated `UserSession` to delegate all `/BNC` commands through `BncCommandHandler`.
 - Modified `IrcConnection` class to use `socket.getaddrinfo()` instead of hardcoded `AF_INET`
