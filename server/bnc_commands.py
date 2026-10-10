@@ -57,6 +57,7 @@ class BncCommandHandler:
             'ATTACH': self.cmd_attach,
 
             # Help
+            'AUTOOP': self.cmd_autoop,
             'HELP': self.cmd_help,
         }
     
@@ -364,18 +365,69 @@ class BncCommandHandler:
     
     # Help
     
+    def cmd_autoop(self, session: object, args: List[str]) -> List[str]:
+        """Manage auto-op masks: /BNC AUTOOP ADD|DEL|LIST [#channel] [nick!user@host]"""
+        user = self.user_db.get_user(session.username)
+        if not user:
+            return [f":server NOTICE {session.nick} :You are not authenticated"]
+
+        if not args:
+            return [f":server NOTICE {session.nick} :Usage: /BNC AUTOOP ADD #channel nick!user@host"]
+
+        subcmd = args[0].upper()
+        network = session.current_network or (list(self.irc_clients.keys())[0] if len(self.irc_clients) == 1 else None)
+        if not network:
+            return [f":server NOTICE {session.nick} :No network selected"]
+
+        if subcmd == 'LIST':
+            channel_filter = args[1].lower() if len(args) > 1 else None
+            network_ops = user.auto_op.get(network, {})
+            if not network_ops:
+                return [f":server NOTICE {session.nick} :No auto-op masks for {network}"]
+            lines = [f":server NOTICE {session.nick} :Auto-op masks for {network}:"]
+            for ch, masks in sorted(network_ops.items()):
+                if channel_filter and ch != channel_filter:
+                    continue
+                lines.append(f":server NOTICE {session.nick} :  {ch}: {' '.join(masks)}")
+            return lines
+
+        if len(args) < 3:
+            return [f":server NOTICE {session.nick} :Usage: /BNC AUTOOP ADD #channel nick!user@host"]
+
+        channel = args[1].lower()
+        mask = args[2]
+        if not mask.count('!') == 1 or '@' not in mask.split('!')[1]:
+            return [f":server NOTICE {session.nick} :Mask must be nick!user@host"]
+
+        network_ops = user.auto_op.setdefault(network, {})
+        channel_masks = network_ops.setdefault(channel, [])
+
+        if subcmd == 'ADD':
+            if mask not in channel_masks:
+                channel_masks.append(mask)
+                self.user_db.save()
+            return [f":server NOTICE {session.nick} :Added auto-op: {mask} on {channel}"]
+        elif subcmd == 'DEL':
+            if mask in channel_masks:
+                channel_masks.remove(mask)
+                self.user_db.save()
+            return [f":server NOTICE {session.nick} :Removed auto-op: {mask} from {channel}"]
+        else:
+            return [f":server NOTICE {session.nick} :Unknown AUTOOP subcommand: {subcmd}"]
+
     def cmd_help(self, session: object, args: List[str]) -> List[str]:
         """Show help: /BNC HELP [command]"""
         if args:
             cmd = args[0].upper()
             return [f":server NOTICE {session.nick} :Help for {cmd}: (detailed help stub)"]
-        
+
         return [
             f":server NOTICE {session.nick} :=== BNC Commands ===",
             f":server NOTICE {session.nick} :Connection: CONNECT, DISCONNECT, RECONNECT, JUMP, NETWORKS, STATUS",
             f":server NOTICE {session.nick} :Messaging: SAY, RAW",
             f":server NOTICE {session.nick} :Session: DETACH, ATTACH",
             f":server NOTICE {session.nick} :Buffer: BUFFER, CLEARBUFFER",
+            f":server NOTICE {session.nick} :Channel: AUTOOP",
             f":server NOTICE {session.nick} :Admin: ADDUSER, DELUSER, LISTUSERS, SETPASS",
             f":server NOTICE {session.nick} :Use /BNC HELP <command> for details",
             f":server NOTICE {session.nick} :===================="

@@ -306,6 +306,9 @@ class UserSession(threading.Thread):
         # Add callback for messages from IRC
         client.add_message_callback(self._on_irc_message)
 
+        # Register this user's auto-op masks with the upstream IRC client.
+        self._register_auto_op_masks(client, network_name)
+
         # Send connection info
         if client.is_connected():
             # Replay the real registration burst (001/002/003/.../376/MOTD/
@@ -364,8 +367,49 @@ class UserSession(threading.Thread):
 
                 for line in client.state.channel_who.get(channel_lower, []):
                     self._send(line)
+
+                # Run auto-op checks against currently known users in the channel.
+                self._apply_auto_op_masks(client, network_name, channel)
         else:
             self._send(f":server NOTICE * :Network {network_name} not connected")
+
+    def _register_auto_op_masks(self, client: IrcClient, network_name: str) -> None:
+        """Register the current user's auto-op masks on the IRC client."""
+        account = self._get_user_account()
+        if not account:
+            return
+        for channel, masks in account.auto_op.get(network_name, {}).items():
+            if masks:
+                client.add_auto_op_masks(channel, masks)
+
+    def _unregister_auto_op_masks(self, client: IrcClient, network_name: str) -> None:
+        """Unregister the current user's auto-op masks from the IRC client."""
+        account = self._get_user_account()
+        if not account:
+            return
+        for channel, masks in account.auto_op.get(network_name, {}).items():
+            if masks:
+                client.remove_auto_op_masks(channel, masks)
+
+    def _apply_auto_op_masks(self, client: IrcClient, network_name: str, channel: str) -> None:
+        """Immediately op any users in the channel matching auto-op masks."""
+        account = self._get_user_account()
+        if not account:
+            return
+        channel_lower = channel.lower()
+        masks = account.get_auto_op_masks(network_name, channel)
+        if not masks:
+            return
+        for nick_lower, user_info in client.state.users.items():
+            nick = user_info.get('nick')
+            ident = user_info.get('ident')
+            host = user_info.get('host')
+            if not nick or not ident or not host:
+                continue
+            for mask in masks:
+                if account.mask_matches(mask, nick, ident, host):
+                    client._send(f"MODE {channel} +o {nick}")
+                    break
 
     def _send_buffer_playback(self, network: str) -> None:
         """Send buffered messages to user since their last detach/login."""
@@ -614,6 +658,9 @@ class UserSession(threading.Thread):
     def _detach_from_network(self) -> None:
         """Detach from current network."""
         if self.selected_client:
+            # Unregister auto-op masks for this user.
+            if self.current_network:
+                self._unregister_auto_op_masks(self.selected_client, self.current_network)
             # Remove our message callback so traffic is buffered instead of
             # being relayed to a disconnected client.
             try:

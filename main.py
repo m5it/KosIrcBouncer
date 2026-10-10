@@ -78,6 +78,13 @@ class IrcBnc:
                     password_hash=user_cfg.password_hash,
                     is_admin=user_cfg.is_admin,
                     allowed_networks=set(user_cfg.allowed_networks),
+                    auto_op={
+                        net: {
+                            ch.lower(): list(masks)
+                            for ch, masks in channels.items()
+                        }
+                        for net, channels in user_cfg.auto_op.items()
+                    },
                 )
         self.user_db.save()
         print(f"[Setup] Loaded {len(self.user_db.users)} user(s) from config")

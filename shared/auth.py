@@ -56,6 +56,9 @@ class UserAccount:
     allowed_networks: Set[str] = field(default_factory=set)
     allowed_ips: Set[str] = field(default_factory=set)  # CIDR notation
     saved_channels: Dict[str, Set[str]] = field(default_factory=dict)  # network -> channels
+    # network -> channel -> list of nick!user@host masks to auto-op on join
+    auto_op: Dict[str, Dict[str, List[str]]] = field(default_factory=dict)
+
     
     def check_password(self, password: str) -> bool:
         """Verify password."""
@@ -89,6 +92,39 @@ class UserAccount:
                 return True
         return False
 
+    def get_auto_op_masks(self, network: str, channel: str) -> List[str]:
+        """Return auto-op masks for a network and channel."""
+        return self.auto_op.get(network, {}).get(channel.lower(), [])
+
+    @staticmethod
+    def mask_matches(mask: str, nick: str, ident: str, host: str) -> bool:
+        """Check if nick!ident@host matches a wildcard mask."""
+        if '!' not in mask or '@' not in mask:
+            return False
+        m_nick, rest = mask.split('!', 1)
+        m_ident, m_host = rest.split('@', 1)
+
+        def wc_match(pattern: str, text: str) -> bool:
+            if pattern == '*':
+                return True
+            # Simple * wildcard matching.
+            parts = pattern.lower().split('*')
+            if parts[0] and not text.lower().startswith(parts[0]):
+                return False
+            if parts[-1] and not text.lower().endswith(parts[-1]):
+                return False
+            pos = 0
+            for part in parts:
+                if not part:
+                    continue
+                idx = text.lower().find(part, pos)
+                if idx == -1:
+                    return False
+                pos = idx + len(part)
+            return True
+
+        return wc_match(m_nick, nick) and wc_match(m_ident, ident) and wc_match(m_host, host)
+
 
 class UserDatabase:
     """Persistent user storage."""
@@ -121,6 +157,13 @@ class UserDatabase:
                         saved_channels={
                             net: set(chans)
                             for net, chans in user_data.get('saved_channels', {}).items()
+                        },
+                        auto_op={
+                            net: {
+                                ch.lower(): list(masks)
+                                for ch, masks in channels.items()
+                            }
+                            for net, channels in user_data.get('auto_op', {}).items()
                         }
                     )
         except Exception as e:
@@ -144,6 +187,12 @@ class UserDatabase:
                 'allowed_ips': list(user.allowed_ips),
                 'saved_channels': {
                     net: list(chans) for net, chans in user.saved_channels.items()
+                },
+                'auto_op': {
+                    net: {
+                        ch: list(masks) for ch, masks in channels.items()
+                    }
+                    for net, channels in user.auto_op.items()
                 },
             }
         

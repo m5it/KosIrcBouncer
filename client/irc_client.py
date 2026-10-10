@@ -64,16 +64,21 @@ class IrcClient:
         self._on_message: List[Callable[[IrcMessage], None]] = []
         self._on_connect: List[Callable[[], None]] = []
         self._on_disconnect: List[Callable[[], None]] = []
-        
+
         # Threads
         self._running = False
         self._worker_thread: Optional[threading.Thread] = None
-        
+
         # Auto-reconnect
         self._reconnect_attempts = 0
         self._max_reconnect_delay = 300  # 5 minutes
         self._last_server_pong = 0.0
         self._last_sent_ping = 0.0
+
+        # Auto-op masks aggregated from all attached BNC users.
+        # channel_lower -> set of nick!user@host masks.
+        self._auto_op_masks: Dict[str, Set[str]] = {}
+        self._auto_op_lock = threading.Lock()
     
     def start(self) -> None:
         """Start IRC client in background thread."""
@@ -384,8 +389,18 @@ class IrcClient:
             self.state.channel_modes[channel_lower] = []
             self.state.channel_users[channel_lower] = {}
             print(f"[IRC] Joined {channel}")
+            # Request WHO so we get hostmasks for auto-op decisions.
+            with self._auto_op_lock:
+                has_masks = bool(self._auto_op_masks.get(channel_lower))
+            if has_masks:
+                self._send(f"WHO {channel}")
         else:
             self.state.channel_users.setdefault(channel_lower, {})[nick.lower()] = ""
+            # If we have auto-op masks, look up the joining user's host.
+            with self._auto_op_lock:
+                has_masks = bool(self._auto_op_masks.get(channel_lower))
+            if has_masks:
+                self._send(f"WHO {nick}")
 
     def _handle_part(self, msg: IrcMessage) -> None:
         """Handle PART."""
@@ -506,6 +521,10 @@ class IrcClient:
                 nick = nick[1:]
             if nick:
                 users[nick.lower()] = prefix
+                # Trigger auto-op on names sync if we know ident@host.
+                user_info = self.state.users.get(nick.lower(), {})
+                if user_info.get('ident') and user_info.get('host'):
+                    self._check_auto_op(channel, nick, user_info['ident'], user_info['host'])
 
     def _handle_endofnames(self, msg: IrcMessage) -> None:
         """Capture RPL_ENDOFNAMES (366) for later replay."""
@@ -530,10 +549,20 @@ class IrcClient:
 
     def _handle_whoreply(self, msg: IrcMessage) -> None:
         """Capture RPL_WHOREPLY (352) for later replay."""
-        channel = self._channel_from_numeric(msg, 1)
-        if not channel:
+        if len(msg.params) < 7:
             return
+        channel = msg.params[1].lstrip(':').lower()
         self.state.channel_who.setdefault(channel, []).append(msg.raw)
+        # Store ident/host for auto-op matching.
+        nick = msg.params[6].lstrip(':')
+        ident = msg.params[2]
+        host = msg.params[3]
+        self.state.users[nick.lower()] = {
+            'nick': nick,
+            'ident': ident,
+            'host': host,
+        }
+        self._check_auto_op(channel, nick, ident, host)
 
     def _handle_endofwho(self, msg: IrcMessage) -> None:
         """Capture RPL_ENDOFWHO (315) for later replay."""
@@ -595,6 +624,33 @@ class IrcClient:
     def get_channel_list(self) -> List[str]:
         """Get joined channels."""
         return list(self.state.channels.keys())
+
+    def add_auto_op_masks(self, channel: str, masks: List[str]) -> None:
+        """Register auto-op masks for a channel (from an attached BNC user)."""
+        with self._auto_op_lock:
+            self._auto_op_masks.setdefault(channel.lower(), set()).update(masks)
+
+    def remove_auto_op_masks(self, channel: str, masks: List[str]) -> None:
+        """Unregister auto-op masks for a channel."""
+        with self._auto_op_lock:
+            entry = self._auto_op_masks.get(channel.lower(), set())
+            for m in masks:
+                entry.discard(m)
+            if not entry:
+                self._auto_op_masks.pop(channel.lower(), None)
+
+    def _check_auto_op(self, channel: str, nick: str, ident: str, host: str) -> None:
+        """Send MODE +o if the user matches any registered auto-op mask."""
+        from shared.auth import UserAccount
+        with self._auto_op_lock:
+            masks = list(self._auto_op_masks.get(channel.lower(), set()))
+        if not masks:
+            return
+        for mask in masks:
+            if UserAccount.mask_matches(mask, nick, ident, host):
+                self._send(f"MODE {channel} +o {nick}")
+                print(f"[IRC] Auto-op given to {nick} on {channel} (mask {mask})")
+                return
 
     def build_names_list(self, channel: str) -> List[str]:
         """Generate fresh 353/366 replies from the live channel user list.

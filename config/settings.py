@@ -50,6 +50,8 @@ class UserConfig:
     password_hash: str
     allowed_networks: List[str] = field(default_factory=list)
     is_admin: bool = False
+    # network -> channel -> list of nick!user@host masks to auto-op on join
+    auto_op: Dict[str, Dict[str, List[str]]] = field(default_factory=dict)
 
 
 class Config:
