@@ -406,11 +406,24 @@ class BncCommandHandler:
             if mask not in channel_masks:
                 channel_masks.append(mask)
                 self.user_db.save()
+            # Immediately register on the upstream IRC client and try to op
+            # users already present in the channel.
+            client = session.selected_client
+            if client:
+                client.add_auto_op_masks(channel, [mask])
+                session._apply_auto_op_masks(client, network, channel)
+                # Request WHO for the channel so hostmasks are refreshed and
+                # auto-op triggers for users already present.
+                if client.is_connected():
+                    client._send(f"WHO {channel}")
             return [f":server NOTICE {session.nick} :Added auto-op: {mask} on {channel}"]
         elif subcmd == 'DEL':
             if mask in channel_masks:
                 channel_masks.remove(mask)
                 self.user_db.save()
+            client = session.selected_client
+            if client:
+                client.remove_auto_op_masks(channel, [mask])
             return [f":server NOTICE {session.nick} :Removed auto-op: {mask} from {channel}"]
         else:
             return [f":server NOTICE {session.nick} :Unknown AUTOOP subcommand: {subcmd}"]
