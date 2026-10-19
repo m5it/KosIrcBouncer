@@ -141,6 +141,7 @@ You can also authenticate manually after connecting without a server password:
 | `/BNC RAW <command>` | Send raw IRC command to IRC server |
 | `/BNC DETACH` | Detach (bot continues running) |
 | `/BNC ATTACH` | Reattach to session |
+| `/BNC DEBUG` | Show joined/configured/saved channels and session state |
 | `/BNC NETWORKS` | List available networks |
 | `/BNC ADDUSER <user> <pass> [admin]` | Add user (admin) |
 | `/BNC DELUSER <user>` | Delete user (admin) |
@@ -159,7 +160,7 @@ When you `/JOIN` a channel through the BNC, the channel is saved to your user ac
 - Channel modes, topics and live user lists are replayed
 - Missed channel messages and notices are replayed from the buffer
 
-Channels you `/PART` are removed from your saved list automatically.
+Channels you `/PART` are removed from your saved list and from the upstream auto-join list automatically, so the BNC will not rejoin them after reconnects or restarts.
 
 ## Auto-Op
 

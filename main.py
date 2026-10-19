@@ -58,18 +58,10 @@ class IrcBnc:
         print("=" * 60)
         print("IRC BNC - Starting...")
         print("=" * 60)
-        
-        # Start IRC clients
-        for name, net_config in self.config.networks.items():
-            print(f"\n[Setup] Creating IRC client for {name}...")
-            client = IrcClient(net_config, self.buffer_manager)
-            client.start()
-            self.irc_clients[name] = client
-        
-        # Wait a bit for connections
-        time.sleep(2)
 
-        # Load users from config into UserDatabase
+        # Load users from config into UserDatabase before creating IRC clients
+        # so we can sync the upstream auto-join channel list from saved user
+        # channels.
         self.user_db = UserDatabase(self.config.data_dir)
         for user_cfg in self.config.users.values():
             if user_cfg.username not in self.user_db.users:
@@ -88,6 +80,27 @@ class IrcBnc:
                 )
         self.user_db.save()
         print(f"[Setup] Loaded {len(self.user_db.users)} user(s) from config")
+
+        # Sync network auto-join channel lists with the union of all users'
+        # saved channels. This ensures channels the user has explicitly parted
+        # are not rejoined after a BNC restart.
+        for name, net_config in self.config.networks.items():
+            saved_union = set()
+            for account in self.user_db.users.values():
+                saved_union.update(account.saved_channels.get(name, set()))
+            if saved_union:
+                net_config.channels = sorted(saved_union)
+                print(f"[Setup] {name}: auto-join channels synced to {net_config.channels}")
+
+        # Start IRC clients
+        for name, net_config in self.config.networks.items():
+            print(f"\n[Setup] Creating IRC client for {name}...")
+            client = IrcClient(net_config, self.buffer_manager)
+            client.start()
+            self.irc_clients[name] = client
+
+        # Wait a bit for connections
+        time.sleep(2)
 
         # Start BNC server
         print(f"\n[Setup] Starting BNC server...")

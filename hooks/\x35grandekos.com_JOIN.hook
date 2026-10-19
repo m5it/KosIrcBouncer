@@ -1,0 +1,8 @@
+#!/bin/bash
+# This is example hook
+CHANNEL=$1
+HOST=$2
+NICK=$3
+#...
+
+echo "On JOIN event occured "$CHANNEL" - HOST: "$HOST

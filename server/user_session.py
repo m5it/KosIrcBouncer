@@ -469,6 +469,9 @@ class UserSession(threading.Thread):
                 continue
             if self.selected_client:
                 self.selected_client.join_channel(channel)
+                # Keep the upstream auto-join list in sync so reconnects/
+                # restarts rejoin channels the user explicitly joined.
+                self._add_config_channel(channel)
             self._save_channel(channel)
 
     def _handle_part(self, params: List[str], line: str) -> None:
@@ -482,6 +485,9 @@ class UserSession(threading.Thread):
             reason = ' '.join(params[1:]).lstrip(':') if len(params) > 1 else ""
             if self.selected_client:
                 self.selected_client.part_channel(channel, reason)
+                # Remove from the upstream auto-join list so the channel is
+                # not rejoined on reconnect or BNC restart.
+                self._remove_config_channel(channel)
             self._remove_channel(channel)
     
     def _handle_privmsg(self, params: List[str], line: str) -> None:
@@ -660,6 +666,28 @@ class UserSession(threading.Thread):
                 return
             account.saved_channels.get(network, set()).discard(ch)
         self.user_db.save()
+
+    def _add_config_channel(self, channel: str) -> None:
+        """Add a channel to the upstream network config auto-join list."""
+        if not self.selected_client:
+            return
+        config = self.selected_client.config
+        ch = channel.strip().lower()
+        if not ch.startswith('#'):
+            ch = f"#{ch}"
+        if ch not in [c.lower() for c in config.channels]:
+            config.channels.append(ch)
+
+    def _remove_config_channel(self, channel: str) -> None:
+        """Remove a channel from the upstream network config auto-join list."""
+        if not self.selected_client:
+            return
+        config = self.selected_client.config
+        ch = channel.strip().lower()
+        config.channels = [
+            c for c in config.channels
+            if c.strip().lower() != ch
+        ]
 
     def _detach_from_network(self) -> None:
         """Detach from current network."""

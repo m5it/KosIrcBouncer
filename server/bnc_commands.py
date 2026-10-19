@@ -56,6 +56,9 @@ class BncCommandHandler:
             'DETACH': self.cmd_detach,
             'ATTACH': self.cmd_attach,
 
+            # Debug
+            'DEBUG': self.cmd_debug,
+
             # Help
             'AUTOOP': self.cmd_autoop,
             'HELP': self.cmd_help,
@@ -424,6 +427,51 @@ class BncCommandHandler:
         else:
             return [f":server NOTICE {session.nick} :Unknown AUTOOP subcommand: {subcmd}"]
 
+    def cmd_debug(self, session: object, args: List[str]) -> List[str]:
+        """Show debug info: /BNC DEBUG"""
+        responses = [
+            f":server NOTICE {session.nick} :=== BNC Debug ===",
+            f":server NOTICE {session.nick} :Session nick: {session.nick}",
+            f":server NOTICE {session.nick} :Authenticated: {session.authenticated}",
+            f":server NOTICE {session.nick} :Detached: {getattr(session, 'detached', False)}",
+            f":server NOTICE {session.nick} :Current network: {session.current_network or 'None'}",
+        ]
+
+        client = session.selected_client
+        if not client:
+            responses.append(f":server NOTICE {session.nick} :No IRC client selected")
+            responses.append(f":server NOTICE {session.nick} :=================")
+            return responses
+
+        responses.extend([
+            f":server NOTICE {session.nick} :Upstream connected: {client.is_connected()}",
+            f":server NOTICE {session.nick} :Upstream nick: {client.state.current_nick or '-'}",
+            f":server NOTICE {session.nick} :Upstream hostmask: {client.state.hostmask or '-'}",
+            f":server NOTICE {session.nick} :Configured auto-join channels: {', '.join(client.config.channels) or '(none)'}",
+        ])
+
+        if client.state.channels:
+            responses.append(f":server NOTICE {session.nick} :Joined channels:")
+            for channel_lower, info in sorted(client.state.channels.items()):
+                users = client.state.channel_users.get(channel_lower, {})
+                responses.append(
+                    f":server NOTICE {session.nick} :  {info.get('name', channel_lower)} "
+                    f"(users: {len(users)})"
+                )
+        else:
+            responses.append(f":server NOTICE {session.nick} :Joined channels: (none)")
+
+        account = getattr(session, '_get_user_account', lambda: None)()
+        if account and session.current_network:
+            saved = account.saved_channels.get(session.current_network, set())
+            responses.append(
+                f":server NOTICE {session.nick} :Saved channels for you: {', '.join(sorted(saved)) or '(none)'}")
+        elif session.current_network:
+            responses.append(f":server NOTICE {session.nick} :Saved channels for you: (no user account)")
+
+        responses.append(f":server NOTICE {session.nick} :=================")
+        return responses
+
     def cmd_help(self, session: object, args: List[str]) -> List[str]:
         """Show help: /BNC HELP [command]"""
         if args:
@@ -436,6 +484,7 @@ class BncCommandHandler:
             f":server NOTICE {session.nick} :Messaging: SAY, RAW",
             f":server NOTICE {session.nick} :Session: DETACH, ATTACH",
             f":server NOTICE {session.nick} :Buffer: BUFFER, CLEARBUFFER",
+            f":server NOTICE {session.nick} :Debug: DEBUG",
             f":server NOTICE {session.nick} :Channel: AUTOOP",
             f":server NOTICE {session.nick} :Admin: ADDUSER, DELUSER, LISTUSERS, SETPASS",
             f":server NOTICE {session.nick} :Use /BNC HELP <command> for details",
