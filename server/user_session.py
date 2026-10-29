@@ -315,7 +315,7 @@ class UserSession(threading.Thread):
             # NickServ notices) that the upstream IRC server sent.  This lets
             # the IRC client know it is attached to a fully registered session.
             for line in client.state.registration_burst:
-                self._send(line)
+                self._send(self._rewrite_replayed_line(line, client))
 
             # Re-emit our current nick as a NICK command so the client knows
             # what nickname this session is using.
@@ -364,7 +364,7 @@ class UserSession(threading.Thread):
                 # Replay channel metadata: modes, names, and WHO replies.
                 # This is exactly what HexChat expects after a JOIN.
                 for line in client.state.channel_modes.get(channel_lower, []):
-                    self._send(line)
+                    self._send(self._rewrite_replayed_line(line, client))
                     time.sleep(0.05)
 
                 # Send a fresh, live 353/366 names list for this channel.
@@ -373,7 +373,7 @@ class UserSession(threading.Thread):
                     time.sleep(0.05)
 
                 for line in client.state.channel_who.get(channel_lower, []):
-                    self._send(line)
+                    self._send(self._rewrite_replayed_line(line, client))
                     time.sleep(0.05)
 
                 # Run auto-op checks against currently known users in the channel.
@@ -428,6 +428,50 @@ class UserSession(threading.Thread):
                     time.sleep(0.35)
                     break
 
+    def _rewrite_replayed_line(self, line: str, client: Optional[IrcClient]) -> str:
+        """Rewrite nick references in a replayed IRC line to current values.
+
+        Numeric replies have the client nick as their second parameter; this is
+        rewritten to the current session nick. Anywhere the upstream's previous
+        nick appears it is replaced by the current upstream nick so the BNC does
+        not present stale nicknames to the downstream client.
+        """
+        if not client or not self.nick:
+            return line
+
+        try:
+            msg = IrcMessage.parse(line)
+        except Exception:
+            return line
+
+        # Numeric replies: :prefix CODE <client_nick> ...
+        if msg.command.isdigit() and len(msg.command) == 3 and msg.params:
+            if msg.params[0] != self.nick:
+                msg.params[0] = self.nick
+
+            # WHO reply: also rewrite the queried nick if it is our previous nick.
+            if msg.command == '352' and len(msg.params) >= 6:
+                queried = msg.params[5]
+                prev = client.state.previous_nick
+                curr = client.state.current_nick
+                if prev and curr and queried == prev:
+                    msg.params[5] = curr
+
+            return msg.to_raw()
+
+        # Non-numeric lines (PRIVMSG, NOTICE, JOIN, PART, etc.) may contain the
+        # upstream's previous nick in the prefix. Replace it with the current
+        # nick so the downstream client sees a consistent nickname.
+        prev = client.state.previous_nick
+        curr = client.state.current_nick
+        if prev and curr and prev != curr:
+            if line.startswith(f":{prev}!") or line.startswith(f":{prev} "):
+                line = line.replace(f":{prev}", f":{curr}", 1)
+            elif f":{prev}!" in line:
+                line = line.replace(f":{prev}!", f":{curr}!", 1)
+
+        return line
+
     def _send_buffer_playback(self, network: str) -> None:
         """Send buffered messages to user since their last detach/login."""
         if not self.buffer_manager:
@@ -445,14 +489,18 @@ class UserSession(threading.Thread):
             return
 
         self._send(f":server NOTICE * :Replay {len(entries)} buffered message(s)")
+        client = self.selected_client
         for entry in entries:
-            self._send(entry.message)
+            line = self._rewrite_replayed_line(entry.message, client)
+            self._send(line)
     
     def _on_irc_message(self, msg: IrcMessage) -> None:
         """Handle message from IRC network."""
-        # Relay to user
+        # Relay to user, rewriting nick references if the user's nick has
+        # changed since the line was captured.
         if msg.raw:
-            self._send(msg.raw)
+            line = self._rewrite_replayed_line(msg.raw, self.selected_client)
+            self._send(line)
     
     def _handle_ping(self, params: List[str], line: str) -> None:
         """Handle PING from user."""
@@ -537,7 +585,7 @@ class UserSession(threading.Thread):
             cached = self.selected_client.state.channel_who.get(target, [])
             if cached:
                 for cached_line in cached:
-                    self._send(cached_line)
+                    self._send(self._rewrite_replayed_line(cached_line, self.selected_client))
                 return
 
         # Forward to IRC. Replies will be buffered and relayed by _on_irc_message.
@@ -581,7 +629,7 @@ class UserSession(threading.Thread):
         # Serve cached names if available, otherwise pass through to IRC.
         if self.selected_client and channel in self.selected_client.state.channel_names:
             for cached_line in self.selected_client.state.channel_names[channel]:
-                self._send(cached_line)
+                self._send(self._rewrite_replayed_line(cached_line, self.selected_client))
             return
 
         if self.selected_client:

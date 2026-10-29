@@ -38,6 +38,9 @@ class IrcState:
     channel_users: Dict[str, Dict[str, str]] = field(default_factory=dict)
     # IRC server name used as prefix for generated replies.
     server_name: str = ""
+    # Track the previous nick so cached lines can be rewritten when replaying
+    # to a client whose nick has changed.
+    previous_nick: Optional[str] = None
 
 
 class IrcClient:
@@ -439,6 +442,7 @@ class IrcClient:
         if not old_nick or not new_nick:
             return
         if old_nick == self.state.current_nick:
+            self.state.previous_nick = old_nick
             self.state.current_nick = new_nick
             # Keep the configured nick in sync so reconnects use the new nick.
             self.config.nick = new_nick
@@ -634,6 +638,9 @@ class IrcClient:
         Updates the in-memory config so that reconnects keep the same nickname
         the user set.
         """
+        old_nick = self.state.current_nick
+        if old_nick and old_nick != new_nick:
+            self.state.previous_nick = old_nick
         self.state.nick = new_nick
         self.state.current_nick = new_nick
         self.config.nick = new_nick

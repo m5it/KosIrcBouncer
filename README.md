@@ -162,6 +162,14 @@ When you `/JOIN` a channel through the BNC, the channel is saved to your user ac
 
 Channels you `/PART` are removed from your saved list and from the upstream auto-join list automatically, so the BNC will not rejoin them after reconnects or restarts.
 
+## Nickname Changes
+
+When you change your nick from the IRC client (`/NICK newnick`), the BNC:
+
+- Sends the nick change to the upstream IRC network
+- Keeps the new nick for reconnects and BNC restarts
+- Rewrites cached replay data (WHO, NAMES, MOTD, buffered messages) so you do not see stale nicknames like `realt3ch` mixed with `t3ch`
+
 ## Auto-Op
 
 The BNC can automatically op users when they join a channel based on hostmask

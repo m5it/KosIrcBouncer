@@ -87,6 +87,19 @@ class IrcMessage:
     def __str__(self) -> str:
         return f"[{self.timestamp}] {self.command}: {self.params} :{self.trailing}"
 
+    def to_raw(self) -> str:
+        """Rebuild the raw IRC line from parsed components."""
+        parts = []
+        if self.prefix:
+            parts.append(f":{self.prefix}")
+        parts.append(self.command)
+        if self.params:
+            parts.extend(str(p) for p in self.params)
+        trailing = self.trailing
+        if trailing is not None:
+            parts.append(f":{trailing}")
+        return " ".join(parts)
+
 
 @dataclass
 class ChannelMessage:
