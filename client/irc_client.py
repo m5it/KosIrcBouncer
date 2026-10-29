@@ -274,9 +274,11 @@ class IrcClient:
             self._handle_endofwho(msg)
 
         elif code == 376:  # RPL_ENDOFMOTD
-            # Join configured channels
+            # Join configured channels with a small delay so a long auto-join
+            # list does not flood the IRC server and trigger Excess Flood.
             for channel in self.config.channels:
                 self.join_channel(channel)
+                time.sleep(0.4)
     
     def _handle_command(self, msg: IrcMessage) -> None:
         """Handle IRC commands."""
@@ -438,6 +440,8 @@ class IrcClient:
             return
         if old_nick == self.state.current_nick:
             self.state.current_nick = new_nick
+            # Keep the configured nick in sync so reconnects use the new nick.
+            self.config.nick = new_nick
 
         old_lower = old_nick.lower()
         new_lower = new_nick.lower()
@@ -625,7 +629,14 @@ class IrcClient:
         self._send(f"PRIVMSG {target} :\x01ACTION {action}\x01")
 
     def change_nick(self, new_nick: str) -> None:
-        """Change nickname."""
+        """Change nickname.
+
+        Updates the in-memory config so that reconnects keep the same nickname
+        the user set.
+        """
+        self.state.nick = new_nick
+        self.state.current_nick = new_nick
+        self.config.nick = new_nick
         self._send(f"NICK {new_nick}")
 
     def set_away(self, message: Optional[str]) -> None:
@@ -668,6 +679,8 @@ class IrcClient:
             if match:
                 print(f"[IRC] Auto-op: sending MODE {channel} +o {nick}")
                 self._send(f"MODE {channel} +o {nick}")
+                # Let the upstream rate limiter/throttler catch up.
+                time.sleep(0.35)
                 return
 
     def build_names_list(self, channel: str) -> List[str]:

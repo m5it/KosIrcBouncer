@@ -35,6 +35,14 @@ class IrcConnection:
         self.bytes_received = 0
         self.connect_time: Optional[datetime] = None
         self.last_activity: float = 0.0
+
+        # Rate limiting to avoid upstream "Excess Flood" disconnects.
+        # Libera allows roughly 1 line per 250 ms for unidentd clients.
+        self._send_times: List[float] = []
+        self._rate_window = 1.0  # seconds
+        self._rate_max = 3     # lines per window (conservative)
+        self._rate_min_interval = 0.35  # seconds between lines
+        self._rate_lock = threading.Lock()
     
     def connect(self) -> bool:
         """Establish connection to IRC server."""
@@ -131,10 +139,41 @@ class IrcConnection:
         if self.receive_thread and self.receive_thread.is_alive():
             self.receive_thread.join(timeout=2)
     
+    def _rate_limit_wait(self) -> None:
+        """Throttle outgoing messages to avoid upstream excess flood."""
+        now = time.time()
+        with self._rate_lock:
+            # Drop timestamps outside the sliding window
+            cutoff = now - self._rate_window
+            self._send_times = [t for t in self._send_times if t > cutoff]
+
+            # Enforce minimum interval between consecutive lines
+            if self._send_times:
+                elapsed_since_last = now - self._send_times[-1]
+                if elapsed_since_last < self._rate_min_interval:
+                    sleep_time = self._rate_min_interval - elapsed_since_last
+                    time.sleep(sleep_time)
+                    now = time.time()
+
+            # If we already hit the per-window limit, sleep until the oldest
+            # message in the window expires.
+            if len(self._send_times) >= self._rate_max:
+                sleep_time = (self._send_times[0] + self._rate_window) - now
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                    now = time.time()
+                    cutoff = now - self._rate_window
+                    self._send_times = [t for t in self._send_times if t > cutoff]
+
+            self._send_times.append(now)
+
     def send(self, message: str) -> bool:
         """Send raw IRC message."""
         if not self.connected or not self.socket:
             return False
+
+        # Throttle before sending to avoid flooding the IRC server.
+        self._rate_limit_wait()
 
         try:
             # Ensure CRLF termination

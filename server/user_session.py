@@ -355,19 +355,26 @@ class UserSession(threading.Thread):
                 channel_lower = channel.lower()
                 if channel not in irc_channels:
                     client.join_channel(channel)
+                    # Give the upstream throttler a moment so rapid JOINs
+                    # (for example on attach with many saved channels) do not
+                    # trigger an Excess Flood kill.
+                    time.sleep(0.4)
                 self._send(f":{hostmask} JOIN {channel}")
 
                 # Replay channel metadata: modes, names, and WHO replies.
                 # This is exactly what HexChat expects after a JOIN.
                 for line in client.state.channel_modes.get(channel_lower, []):
                     self._send(line)
+                    time.sleep(0.05)
 
                 # Send a fresh, live 353/366 names list for this channel.
                 for line in client.build_names_list(channel):
                     self._send(line)
+                    time.sleep(0.05)
 
                 for line in client.state.channel_who.get(channel_lower, []):
                     self._send(line)
+                    time.sleep(0.05)
 
                 # Run auto-op checks against currently known users in the channel.
                 self._apply_auto_op_masks(client, network_name, channel)
@@ -415,6 +422,10 @@ class UserSession(threading.Thread):
                 if match:
                     print(f"[BNC] Auto-op: sending MODE {channel} +o {nick}")
                     client._send(f"MODE {channel} +o {nick}")
+                    # Small delay between consecutive MODE commands to avoid
+                    # triggering upstream excess flood on channels with many
+                    # matching users.
+                    time.sleep(0.35)
                     break
 
     def _send_buffer_playback(self, network: str) -> None:
