@@ -268,7 +268,7 @@ def test_buffer_system():
     print("   ✓ Search works")
     
     # Get last
-    last = buf.get_last(5)
+    last = buf.get_messages(count=5)
     assert len(last) == 5
     print("   ✓ Get last works")
     
