@@ -5,9 +5,11 @@ All notable changes to the IRC BNC project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] - 2026-10-30
 
 ### Added
+- **Per-user auto-op**: Configure hostmask patterns per network and channel to automatically grant operator status when matching users join.
+- **BNC debug command**: Added a debug command for inspecting BNC state.
 - **Real IRC session replay on attach**: When an IRC client reconnects, the BNC now replays the upstream server's actual registration burst (001, 002, 003, MOTD, NickServ notices, etc.) instead of fake BNC welcome messages.
 - **Persistent channels**: Channels joined by the user are saved per-network in `users.json` and automatically rejoined on the next login.
 - **Live channel state replay**: Re-joining a channel replays channel modes, creation time, a freshly generated `353 RPL_NAMREPLY`/`366 RPL_ENDOFNAMES` user list, and cached `352 RPL_WHOREPLY`/`315 RPL_ENDOFWHO` replies.
@@ -28,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Connection handling**: Improved connection resilience with multiple address family attempts
 - **Authentication**: User accounts from `config.json` are now loaded into `UserDatabase` at startup and used to validate `PASS` and `/BNC LOGIN`.
 - **Channel metadata handling**: Per-channel numerics (324/329/352/353/366/315) are no longer buffered globally, preventing duplication and preserving correct message order on replay.
+- **Auto-join channel persistence**: Explicitly parting a channel removes it from the saved auto-join list so it is not rejoined after a restart.
 
 ### Fixed
 - Fixed upstream IRC reconnect after ping timeout: `IrcConnection` is now recreated on every reconnect and the IRC client sends keepalive PINGs / detects dead connections after 180s of inactivity.
@@ -41,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed re-attach hostmask detection using the wrong `WHO` reply parameter for the user's own nick (status field was used instead of the nick field).
 - Fixed wildcard matching in auto-op masks by replacing the hand-rolled matcher with `fnmatch.fnmatchcase`, correctly supporting `*`, `?` and multi-part wildcards such as `realt3ch!*@*.example.com`.
 - Removed proactive `WHO` requests from auto-op: the BNC no longer sends extra WHO traffic; it relies on hostmasks already present in normal IRC traffic (JOIN prefixes, NAMES, client-requested WHO).
+- Fixed disconnect handling so a detached IRC client does not leave its session in an inconsistent state.
+- Fixed nickname-change handling to keep tracked channel and session state in sync.
 
 ### Technical Details
 - Added `registration_burst`, `channel_users`, `channel_names`, `channel_who`, `channel_modes` and `hostmask` to `IrcState`.
@@ -52,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added dual-stack socket option setting for IPv6 sockets
 - Updated configuration dataclass with `ipv6_only` option
 
-## [1.0.0] - 2024-XX-XX
+## [1.0.0] - 2026-10-10
 
 ### Added
 - Initial release of IRC BNC

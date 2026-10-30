@@ -197,7 +197,7 @@ def main():
         default='config.json',
         help='Path to config file (default: config.json)'
     )
-    parser.add_argument('--version', action='version', version='IRC BNC 1.0')
+    parser.add_argument('--version', action='version', version='IRC BNC 1.1.0')
     args = parser.parse_args()
     
     bnc = IrcBnc()
