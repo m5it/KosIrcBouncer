@@ -311,15 +311,20 @@ class UserSession(threading.Thread):
 
         # Send connection info
         if client.is_connected():
+            # Sync the session nick to the upstream nick. If the upstream got a
+            # different nick (e.g. t3ch_ because t3ch was in use), HexChat must
+            # be told so all subsequent JOIN/NAMES replies match the nick the
+            # client believes it is using. Otherwise JOINs appear to come from
+            # a stranger and the channels are not shown as joined.
+            if self.nick and client.state.current_nick and self.nick != client.state.current_nick:
+                self._send(f":{self.nick}!user@host NICK :{client.state.current_nick}")
+                self.nick = client.state.current_nick
+
             # Replay the real registration burst (001/002/003/.../376/MOTD/
             # NickServ notices) that the upstream IRC server sent.  This lets
             # the IRC client know it is attached to a fully registered session.
             for line in client.state.registration_burst:
                 self._send(self._rewrite_replayed_line(line, client))
-
-            # Re-emit our current nick as a NICK command so the client knows
-            # what nickname this session is using.
-            self._send(f":{client.state.current_nick}!user@host NICK :{client.state.current_nick}")
 
             # Play buffer
             self._send_buffer_playback(network_name)
@@ -353,31 +358,37 @@ class UserSession(threading.Thread):
 
             for channel in sorted(all_channels):
                 channel_lower = channel.lower()
-                if channel not in irc_channels:
+                if channel in irc_channels:
+                    # Already joined upstream: fake the JOIN so HexChat shows the
+                    # channel immediately and replay cached metadata.
+                    self._send(f":{hostmask} JOIN {channel}")
+
+                    # Replay channel metadata: modes, names, and WHO replies.
+                    # This is exactly what HexChat expects after a JOIN.
+                    for line in client.state.channel_modes.get(channel_lower, []):
+                        self._send(self._rewrite_replayed_line(line, client))
+                        time.sleep(0.05)
+
+                    # Send a fresh, live 353/366 names list for this channel.
+                    for line in client.build_names_list(channel):
+                        self._send(line)
+                        time.sleep(0.05)
+
+                    for line in client.state.channel_who.get(channel_lower, []):
+                        self._send(self._rewrite_replayed_line(line, client))
+                        time.sleep(0.05)
+
+                    # Run auto-op checks against currently known users in the channel.
+                    self._apply_auto_op_masks(client, network_name, channel)
+                else:
+                    # Not yet joined upstream: request the JOIN, but do NOT send
+                    # a fake JOIN to HexChat. The real upstream JOIN (or error)
+                    # will be relayed through _on_irc_message once it arrives.
                     client.join_channel(channel)
                     # Give the upstream throttler a moment so rapid JOINs
                     # (for example on attach with many saved channels) do not
                     # trigger an Excess Flood kill.
                     time.sleep(0.4)
-                self._send(f":{hostmask} JOIN {channel}")
-
-                # Replay channel metadata: modes, names, and WHO replies.
-                # This is exactly what HexChat expects after a JOIN.
-                for line in client.state.channel_modes.get(channel_lower, []):
-                    self._send(self._rewrite_replayed_line(line, client))
-                    time.sleep(0.05)
-
-                # Send a fresh, live 353/366 names list for this channel.
-                for line in client.build_names_list(channel):
-                    self._send(line)
-                    time.sleep(0.05)
-
-                for line in client.state.channel_who.get(channel_lower, []):
-                    self._send(self._rewrite_replayed_line(line, client))
-                    time.sleep(0.05)
-
-                # Run auto-op checks against currently known users in the channel.
-                self._apply_auto_op_masks(client, network_name, channel)
         else:
             self._send(f":server NOTICE * :Network {network_name} not connected")
 
