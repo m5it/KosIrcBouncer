@@ -794,7 +794,7 @@ class UserSession(threading.Thread):
             return
         
         self._send(f":server 001 {self.nick} :Welcome to IRC BNC")
-        self._send(f":server 002 {self.nick} :Your host is BNC, running version 1.0")
+        self._send(f":server 002 {self.nick} :Your host is BNC, running version 1.1.1")
         self._send(f":server 003 {self.nick} :This server was created now")
         self._send(f":server 004 {self.nick} BNC 1.0 o o")
         self._send(f":server 251 {self.nick} :There are 0 users and 0 invisible on 1 servers")

@@ -5,6 +5,22 @@ All notable changes to the IRC BNC project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-10-31
+
+### Added
+- **Upstream rate limiting**: Added throttling on all outgoing upstream IRC traffic to avoid "Excess Flood" disconnects.
+- **Nickname sync on attach**: If the upstream IRC client ends up with a different nick (e.g. `t3ch_`), the BNC tells the downstream client its real nick before replaying JOIN/NAMES.
+- **Replay line rewriting**: Cached numeric replies, NAMES, WHO, and buffered messages are rewritten so a nickname change does not leave stale nicknames in replayed traffic.
+
+### Changed
+- **Attach channel handling**: Only channels already joined upstream are replayed as "JOINed" immediately. Channels in the saved list that are not yet joined get a real upstream JOIN request; fake JOINs are no longer sent for failed or pending joins.
+
+### Fixed
+- Fixed Excess Flood disconnects caused by rapid auto-joins, attach replay, and auto-op MODE commands.
+- Fixed channels not appearing joined in the IRC client when the upstream nick differs from the session nick.
+- Fixed persistent nickname changes being lost on upstream reconnect.
+- Fixed user disconnect killing the upstream IRC client.
+
 ## [1.1.0] - 2026-10-30
 
 ### Added
