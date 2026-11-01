@@ -1,0 +1,56 @@
+#!/bin/bash
+# URL context hook for #grandekos.com
+# Keeps last 2 lines per nick; when a URL is posted, prints those 2+url and appends to nick's log with visible separator.
+# Env: IRC_NETWORK, IRC_CHANNEL, IRC_NICK, IRC_TEXT, IRC_BOT_NICK
+
+[ "$IRC_NICK" = "$IRC_BOT_NICK" ] && exit 0
+[ -z "$IRC_CHANNEL" ] && exit 0
+[ -z "$IRC_TEXT" ] && exit 0
+
+BASE="${BNC_DATA_DIR:-/tmp}/bnc_url_context"
+safe_net=$(printf "%s" "$IRC_NETWORK" | tr -c 'A-Za-z0-9._-' '_')
+safe_chan=$(printf "%s" "$IRC_CHANNEL" | tr -c 'A-Za-z0-9._-' '_')
+safe_nick=$(printf "%s" "$IRC_NICK" | tr -c 'A-Za-z0-9._-' '_')
+DIR="$BASE/$safe_net/$safe_chan"
+FILE="$DIR/$safe_nick.txt"
+LOG="$DIR/${safe_nick}.log"
+mkdir -p "$DIR"
+
+exec 9>"$DIR/.lock" 2>/dev/null
+flock -x 9 2>/dev/null || true
+
+is_url=0
+if [[ "$IRC_TEXT" =~ https?://[^[:space:]]+ ]] || [[ "$IRC_TEXT" =~ www\.[^[:space:]]+\.[^[:space:]]+ ]]; then
+    is_url=1
+fi
+
+if [ "$is_url" -eq 1 ]; then
+    # Collect 2 previous lines + URL for display and for log
+    # Send to channel
+    if [ -f "$FILE" ]; then
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            echo "PRIVMSG $IRC_CHANNEL :[$IRC_NICK] $line"
+        done < "$FILE"
+    fi
+    echo "PRIVMSG $IRC_CHANNEL :[$IRC_NICK] $IRC_TEXT"
+
+    # Append to nick's file with visible separation
+    {
+        echo "────────────────────────────────────────"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] $IRC_NICK in $IRC_CHANNEL posted URL:"
+        if [ -f "$FILE" ]; then
+            cat "$FILE"
+        fi
+        echo "$IRC_TEXT"
+        echo ""
+    } >> "$LOG"
+
+    echo "[URL] $IRC_NICK in $IRC_CHANNEL: $IRC_TEXT (logged to $LOG)" >&2
+fi
+
+# Append current line to buffer, keep max 2
+echo "$IRC_TEXT" >> "$FILE"
+if [ "$(wc -l < "$FILE")" -gt 2 ]; then
+    tail -n 2 "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
+fi

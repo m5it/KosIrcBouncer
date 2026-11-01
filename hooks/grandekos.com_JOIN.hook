@@ -3,5 +3,9 @@
 # Available: IRC_NETWORK, IRC_SERVER, IRC_EVENT, IRC_CHANNEL, IRC_NICK, IRC_IDENT, IRC_HOST, IRC_TARGET, IRC_TEXT, IRC_MODE, IRC_RAW
 # Positional: $1=network $2=event $3=channel $4=nick $5=target $6=text
 
+# Don't greet ourselves on our own auto-join
+[ "$IRC_NICK" = "$IRC_BOT_NICK" ] && exit 0
+
 echo "[Hook] On JOIN: $IRC_NICK ($IRC_IDENT@$IRC_HOST) joined $IRC_CHANNEL on $IRC_NETWORK" >> /tmp/bnc.log
 echo "On JOIN: $IRC_NICK joined $IRC_CHANNEL on $IRC_NETWORK"
+echo "PRIVMSG $IRC_CHANNEL :Hello $IRC_NICK!"
