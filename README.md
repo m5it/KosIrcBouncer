@@ -368,4 +368,4 @@ Use the `/BNC STATUS` command to see your connection details including the addre
 
 ## License
 
-MIT License - See LICENSE file
+Copyright 2026 Blaz Kos — Modified Apache License 2.0 with additional terms (notification, payment for commercial use, audit rights, termination, governing law Canary Islands / consumer fallback Slovenia, mediation) — see `LICENSE` file.

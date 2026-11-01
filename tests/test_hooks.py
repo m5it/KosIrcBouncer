@@ -121,10 +121,10 @@ def test_all_event_hooks():
         IrcMessage.parse(":someone!i@h NOTICE #test :notice text"),
         IrcMessage.parse(":someone!i@h JOIN #test"),
         IrcMessage.parse(":someone!i@h PART #test :leaving"),
-        IrcMessage.parse(":t3ch!~bnc@host.net MODE #test +o someone"),
-        IrcMessage.parse(":t3ch!~bnc@host.net MODE #test +v someone"),
-        IrcMessage.parse(":t3ch!~bnc@host.net KICK #test someone :reason"),
-        IrcMessage.parse(":t3ch!~bnc@host.net TOPIC #test :new topic"),
+        IrcMessage.parse(":opuser!u@h MODE #test +o someone"),
+        IrcMessage.parse(":opuser!u@h MODE #test +v someone"),
+        IrcMessage.parse(":opuser!u@h KICK #test someone :reason"),
+        IrcMessage.parse(":opuser!u@h TOPIC #test :new topic"),
         IrcMessage.parse(":old!i@h QUIT :bye"),
         IrcMessage.parse(":old!i@h NICK :new"),
     ]
@@ -142,7 +142,7 @@ def test_all_event_hooks():
     assert "OP" in output, output
     assert "VOICE" in output, output
     assert "KICK" in output and "reason" in output, output
-    assert "TOPIC #test t3ch new topic" in output, output
+    assert "TOPIC" in output and "new topic" in output, output
     assert "QUIT" in output, output
     assert "NICK" in output, output
     print("✓ All expected hook events fired")

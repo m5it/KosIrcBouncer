@@ -86,6 +86,11 @@ class IrcClient:
 
         # External hook manager for network events.
         self.hook_manager: Optional[object] = None
+
+        # Flood protection for hooks: remember what we just sent via hooks
+        # so echoed PRIVMSGs do not re-trigger hooks.
+        self._hook_echo_cache: Dict[tuple, float] = {}
+        self._bot_nicks: Set[str] = {config.nick.lower()} if config.nick else set()
     
     def start(self) -> None:
         """Start IRC client in background thread."""
@@ -352,6 +357,13 @@ class IrcClient:
         
         target = msg.params[0]
         text = msg.trailing or ""
+
+        # Avoid feedback loops: do not fire hooks for messages
+        # previously sent via hooks (echoed back) and for our own bot nick.
+        if self._is_hook_echo(target, text):
+            return
+        if msg.nick and msg.nick.lower() in self._bot_nicks:
+            return
         
         # Determine if channel or query
         is_channel = target.startswith(('#', '&', '+', '!'))
@@ -394,6 +406,8 @@ class IrcClient:
         """Handle NOTICE."""
         if not msg.params:
             return
+        if msg.nick and msg.nick.lower() == (self.state.current_nick or "").lower():
+            return
         target = msg.params[0]
         text = msg.trailing or ""
         is_channel = target.startswith(('#', '&', '+', '!'))
@@ -426,15 +440,16 @@ class IrcClient:
                 'host': host,
             }
 
-        self._fire_hook(
-            event='JOIN',
-            channel=channel,
-            nick=nick,
-            ident=ident or None,
-            host=host or None,
-            target=channel,
-            raw=msg.raw,
-        )
+        if nick.lower() != (self.state.current_nick or "").lower():
+            self._fire_hook(
+                event='JOIN',
+                channel=channel,
+                nick=nick,
+                ident=ident or None,
+                host=host or None,
+                target=channel,
+                raw=msg.raw,
+            )
 
         if nick == self.state.current_nick:
             self.state.channels[channel_lower] = {
@@ -463,16 +478,17 @@ class IrcClient:
             return
         channel_lower = channel.lower()
 
-        self._fire_hook(
-            event='PART',
-            channel=channel,
-            nick=nick,
-            ident=msg.ident,
-            host=msg.host,
-            target=channel,
-            text=reason,
-            raw=msg.raw,
-        )
+        if nick.lower() != (self.state.current_nick or "").lower():
+            self._fire_hook(
+                event='PART',
+                channel=channel,
+                nick=nick,
+                ident=msg.ident,
+                host=msg.host,
+                target=channel,
+                text=reason,
+                raw=msg.raw,
+            )
 
         if nick == self.state.current_nick:
             self.state.channels.pop(channel_lower, None)
@@ -486,6 +502,8 @@ class IrcClient:
     def _handle_quit(self, msg: IrcMessage) -> None:
         """Handle QUIT: remove nick from all channels."""
         if not msg.nick:
+            return
+        if msg.nick.lower() == (self.state.current_nick or "").lower():
             return
         reason = msg.trailing or ""
         self._fire_hook(
@@ -507,20 +525,22 @@ class IrcClient:
         if not old_nick or not new_nick:
             return
 
-        self._fire_hook(
-            event='NICK',
-            nick=old_nick,
-            ident=msg.ident,
-            host=msg.host,
-            target=new_nick,
-            raw=msg.raw,
-        )
+        if old_nick.lower() != (self.state.current_nick or "").lower():
+            self._fire_hook(
+                event='NICK',
+                nick=old_nick,
+                ident=msg.ident,
+                host=msg.host,
+                target=new_nick,
+                raw=msg.raw,
+            )
 
         if old_nick == self.state.current_nick:
             self.state.previous_nick = old_nick
             self.state.current_nick = new_nick
             # Keep the configured nick in sync so reconnects use the new nick.
             self.config.nick = new_nick
+            self._remember_bot_nick(new_nick)
 
         old_lower = old_nick.lower()
         new_lower = new_nick.lower()
@@ -542,20 +562,23 @@ class IrcClient:
             self.state.channels.pop(channel, None)
             self.state.channel_users.pop(channel, None)
 
-        self._fire_hook(
-            event='KICK',
-            channel=channel,
-            nick=msg.nick,
-            ident=msg.ident,
-            host=msg.host,
-            target=target,
-            text=reason,
-            raw=msg.raw,
-        )
+        if msg.nick.lower() != (self.state.current_nick or "").lower():
+            self._fire_hook(
+                event='KICK',
+                channel=channel,
+                nick=msg.nick,
+                ident=msg.ident,
+                host=msg.host,
+                target=target,
+                text=reason,
+                raw=msg.raw,
+            )
 
     def _handle_mode(self, msg: IrcMessage) -> None:
         """Handle MODE (track +/-o/v/h/a/q and fire OP/DEOP/VOICE/DEVOICE hooks)."""
         if len(msg.params) < 2:
+            return
+        if msg.nick and msg.nick.lower() == (self.state.current_nick or "").lower():
             return
         channel = msg.params[0].lower()
         if not channel.startswith('#'):
@@ -628,6 +651,8 @@ class IrcClient:
     def _handle_topic(self, msg: IrcMessage) -> None:
         """Handle TOPIC changes from IRC server."""
         if len(msg.params) < 1:
+            return
+        if msg.nick and msg.nick.lower() == (self.state.current_nick or "").lower():
             return
         channel = msg.params[0]
         topic = msg.trailing or ""
@@ -792,6 +817,11 @@ class IrcClient:
         """Send CTCP ACTION."""
         self._send(f"PRIVMSG {target} :\x01ACTION {action}\x01")
 
+    def _remember_bot_nick(self, nick: str) -> None:
+        """Track nicks used by the bot (current, previous, config)."""
+        if nick:
+            self._bot_nicks.add(nick.lower())
+
     def change_nick(self, new_nick: str) -> None:
         """Change nickname.
 
@@ -804,6 +834,7 @@ class IrcClient:
         self.state.nick = new_nick
         self.state.current_nick = new_nick
         self.config.nick = new_nick
+        self._remember_bot_nick(new_nick)
         self._send(f"NICK {new_nick}")
 
     def set_away(self, message: Optional[str]) -> None:
@@ -883,6 +914,22 @@ class IrcClient:
         """Check if connected to IRC."""
         return self.state.registered and self.connection.is_connected()
 
+    def _is_hook_echo(self, target: str, text: str) -> bool:
+        """Check if this PRIVMSG is an echo of a line we recently sent via a hook."""
+        key = (target.lower(), text)
+        now = time.time()
+        # Expire old entries
+        self._hook_echo_cache = {k: t for k, t in self._hook_echo_cache.items() if now - t < 10}
+        return key in self._hook_echo_cache
+
+    def _remember_hook_send(self, line: str) -> None:
+        """Remember a hook-sent line so its echo can be ignored."""
+        parts = line.split(' ', 2)
+        if len(parts) >= 3 and parts[0].upper() in ('PRIVMSG', 'NOTICE'):
+            target = parts[1]
+            text = parts[2].lstrip(':')
+            self._hook_echo_cache[(target.lower(), text)] = time.time()
+
     def add_message_callback(self, callback: Callable[[IrcMessage], None]) -> None:
         """Add message callback."""
         self._on_message.append(callback)
@@ -897,8 +944,15 @@ class IrcClient:
             return
         # Ensure the hook can send back to IRC
         if not self.hook_manager.send_callback:
-            # Use the rate-limited upstream send - safe from background threads
-            self.hook_manager.send_callback = self._send
+            # Use a hook-aware wrapper so we can remember what we sent.
+            def _hook_send(line: str) -> None:
+                self._remember_hook_send(line)
+                if line.upper().startswith(('PRIVMSG ', 'NOTICE ')):
+                    # Track own nick variants
+                    self._remember_bot_nick(self.state.current_nick)
+                    self._remember_bot_nick(self.config.nick)
+                self._send(line)
+            self.hook_manager.send_callback = _hook_send
         from shared.hook_manager import HookEvent
         self.hook_manager.run(HookEvent(
             network=self.config.name,
