@@ -6,7 +6,7 @@ Test Multi-Network Support
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.multi_network import MultiNetworkManager
 from shared.buffer import BufferManager

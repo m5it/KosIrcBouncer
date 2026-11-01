@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verify hooks can send to channel / user / server by echoing commands."""
 import sys, os, tempfile, time
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import IrcNetworkConfig
 from shared.message import IrcMessage

@@ -7,7 +7,7 @@ import os
 import socket
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config, IrcNetworkConfig, BncServerConfig, UserConfig
 from shared.auth import UserDatabase, UserAccount, PasswordHasher

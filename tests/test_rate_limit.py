@@ -6,7 +6,7 @@ import sys
 import os
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Avoid triggering circular imports in the package by importing the module
 # directly instead of the package __init__.
