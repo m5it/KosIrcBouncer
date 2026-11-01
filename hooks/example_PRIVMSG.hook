@@ -1,0 +1,6 @@
+#!/bin/bash
+# Example hook - triggered on every PRIVMSG
+# Available: IRC_NETWORK, IRC_SERVER, IRC_EVENT, IRC_CHANNEL, IRC_NICK, IRC_IDENT, IRC_HOST, IRC_TARGET, IRC_TEXT, IRC_MODE, IRC_RAW
+# Positional: $1=network $2=event $3=channel $4=nick $5=target $6=text
+
+echo "PRIVMSG in $IRC_CHANNEL from $IRC_NICK ($IRC_IDENT@$IRC_HOST): $IRC_TEXT on $IRC_SERVER" >> /tmp/bnc.log

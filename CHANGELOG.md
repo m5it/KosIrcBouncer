@@ -5,6 +5,30 @@ All notable changes to the IRC BNC project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-11-01
+
+### Added
+- **External hook system**: Run user-provided shell scripts on IRC events. Hook files live in `hooks/` (or `$BNC_DATA_DIR/hooks`) and are discovered at runtime without requiring a restart.
+  - Global hooks (`PRIVMSG.hook`), network-specific hooks (`libera_PRIVMSG.hook`) and channel-specific hooks (`grandekos.com_JOIN.hook`) are resolved in priority order across `hooks/` and extra hooks directories.
+  - 17 event types: `PRIVMSG`, `NOTICE`, `JOIN`, `PART`, `KICK`, `MODE`, `OP`, `DEOP`, `VOICE`, `DEVOICE`, `BAN`, `UNBAN`, `TOPIC`, `QUIT`, `NICK`, `CONNECT`, `DISCONNECT` (mode sub-events `HOP`/`DEHOP`, `ADMIN`/`DEADMIN`, `OWNER`/`DEOWNER` also fire from MODE changes).
+  - Every hook receives context via environment variables (`IRC_NETWORK`, `IRC_SERVER`, `IRC_EVENT`, `IRC_CHANNEL`, `IRC_NICK`, `IRC_IDENT`, `IRC_HOST`, `IRC_TARGET`, `IRC_TEXT`, `IRC_MODE`, `IRC_RAW`, `IRC_BOT_NICK`) and positional args `$1=network $2=event [$3=channel $4=nick $5=target $6=text]`.
+  - Hooks execute in background daemon threads with a 30s timeout; non-zero exits and stderr are logged.
+  - Example hooks: `hooks/example_PRIVMSG.hook`, `hooks/example_OP.hook`, `hooks/grandekos.com_JOIN.hook`.
+- **Hook-to-IRC bridge**: Hooks can send IRC commands upstream by echoing them to stdout. The BNC intercepts lines whose first word is a supported command and forwards them via the rate-limited upstream send path.
+  - Supported send prefixes: `PRIVMSG`, `NOTICE`, `MODE`, `KICK`, `TOPIC`, `INVITE`, `JOIN`, `PART`, `QUIT`, `NICK`, `AWAY`, `WHO`, `WHOIS`, `LIST`, `NAMES`, `RAW` (case-insensitive). `RAW <line>` sends the remainder verbatim for arbitrary IRC commands. Non-command stdout is only logged.
+  - Example: `echo "PRIVMSG $IRC_CHANNEL :Hello $IRC_NICK from hook!"` / `echo "MODE $IRC_CHANNEL +v $IRC_NICK"` / `echo "NOTICE $IRC_NICK :Got your message"`.
+
+### Changed
+- **Upstream MODE handling**: `IrcClient._handle_mode` now requires only 2 params, tracks `+/-o/v/h/a/q` with prefix accumulation, and fires dedicated `OP`/`DEOP`/`VOICE`/`DEVOICE`/`HOP`/`DEHOP`/`ADMIN`/`DEADMIN`/`OWNER`/`DEOWNER` hooks plus a generic `MODE` hook.
+- **TOPIC tracking**: Added `IrcClient._handle_topic` to fire `TOPIC` hooks.
+- **NOTICE/PRIVMSG hooks**: `PRIVMSG` and `NOTICE` now fire hook events with full context; `QUIT`, `PART`, `JOIN`, `KICK`, `NICK` hooks also carry reason/target info.
+- **Connection lifecycle hooks**: `CONNECT` fires in `_on_connected`, `DISCONNECT` fires in `_on_disconnected` (called after keepalive loop exits).
+- **Buffer resilience**: `IrcClient` methods now guard against `buffer_manager=None` to support test/embedded usage.
+- **BNC startup**: `main.py` wires a `HookManager` (data-dir hooks + project `hooks/` as fallback) into each `IrcClient` at startup.
+
+### Fixed
+- Fixed `KICK` channel lookup using lowercased keys consistently.
+
 ## [1.1.1] - 2026-10-31
 
 ### Added

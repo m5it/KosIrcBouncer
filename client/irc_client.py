@@ -11,8 +11,9 @@ from datetime import datetime
 from dataclasses import dataclass, field
 
 from config import IrcNetworkConfig
-from shared import IrcMessage, ChannelMessage, BufferManager
+from shared import IrcMessage, ChannelMessage
 from client.connection import IrcConnection
+from shared.hook_manager import HookManager
 
 
 @dataclass
@@ -49,7 +50,7 @@ class IrcClient:
     Connects to IRC networks, handles protocol, buffers messages.
     """
     
-    def __init__(self, config: IrcNetworkConfig, buffer_manager: BufferManager):
+    def __init__(self, config: IrcNetworkConfig, buffer_manager):
         self.config = config
         self.buffer = buffer_manager
         
@@ -82,6 +83,9 @@ class IrcClient:
         # channel_lower -> set of nick!user@host masks.
         self._auto_op_masks: Dict[str, Set[str]] = {}
         self._auto_op_lock = threading.Lock()
+
+        # External hook manager for network events.
+        self.hook_manager: Optional[object] = None
     
     def start(self) -> None:
         """Start IRC client in background thread."""
@@ -157,6 +161,7 @@ class IrcClient:
                 while self._running and self.connection.is_connected():
                     self._maintain_keepalive()
                     time.sleep(0.5)
+                self._on_disconnected()
                 return True
 
             if time.time() - start > timeout:
@@ -311,6 +316,7 @@ class IrcClient:
             'KICK': self._handle_kick,
             'NICK': self._handle_nick,
             'MODE': self._handle_mode,
+            'TOPIC': self._handle_topic,
         }
 
         handler = handlers.get(msg.command)
@@ -349,15 +355,29 @@ class IrcClient:
         
         # Determine if channel or query
         is_channel = target.startswith(('#', '&', '+', '!'))
+
+        # Fire hooks (background scripts)
+        self._fire_hook(
+            event='PRIVMSG',
+            channel=target if is_channel else None,
+            nick=msg.nick,
+            ident=msg.ident,
+            host=msg.host,
+            target=target,
+            text=text,
+            raw=msg.raw,
+        )
         
         # Buffer the message
         buffer_target = target if is_channel else msg.nick
-        self.buffer.add_message(
-            network=self.config.name,
-            target=buffer_target,
-            message=f"<{msg.nick}> {text}",
-            msg_type="PRIVMSG"
-        )
+        if self.buffer:
+            self.buffer.add_message(
+                network=self.config.name,
+
+                target=buffer_target,
+                message=f"<{msg.nick}> {text}",
+                msg_type="PRIVMSG"
+            )
         
         # CTCP handling
         if text.startswith('\x01') and text.endswith('\x01'):
@@ -372,7 +392,21 @@ class IrcClient:
     
     def _handle_notice(self, msg: IrcMessage) -> None:
         """Handle NOTICE."""
-        pass  # Notices usually don't need buffering
+        if not msg.params:
+            return
+        target = msg.params[0]
+        text = msg.trailing or ""
+        is_channel = target.startswith(('#', '&', '+', '!'))
+        self._fire_hook(
+            event='NOTICE',
+            channel=target if is_channel else None,
+            nick=msg.nick,
+            ident=msg.ident,
+            host=msg.host,
+            target=target,
+            text=text,
+            raw=msg.raw,
+        )
     
     def _handle_join(self, msg: IrcMessage) -> None:
         """Handle JOIN."""
@@ -391,6 +425,16 @@ class IrcClient:
                 'ident': ident,
                 'host': host,
             }
+
+        self._fire_hook(
+            event='JOIN',
+            channel=channel,
+            nick=nick,
+            ident=ident or None,
+            host=host or None,
+            target=channel,
+            raw=msg.raw,
+        )
 
         if nick == self.state.current_nick:
             self.state.channels[channel_lower] = {
@@ -414,9 +458,21 @@ class IrcClient:
         """Handle PART."""
         nick = msg.nick
         channel = msg.params[0] if msg.params else ""
+        reason = msg.trailing or ""
         if not nick or not channel:
             return
         channel_lower = channel.lower()
+
+        self._fire_hook(
+            event='PART',
+            channel=channel,
+            nick=nick,
+            ident=msg.ident,
+            host=msg.host,
+            target=channel,
+            text=reason,
+            raw=msg.raw,
+        )
 
         if nick == self.state.current_nick:
             self.state.channels.pop(channel_lower, None)
@@ -431,6 +487,15 @@ class IrcClient:
         """Handle QUIT: remove nick from all channels."""
         if not msg.nick:
             return
+        reason = msg.trailing or ""
+        self._fire_hook(
+            event='QUIT',
+            nick=msg.nick,
+            ident=msg.ident,
+            host=msg.host,
+            text=reason,
+            raw=msg.raw,
+        )
         nick_lower = msg.nick.lower()
         for users in self.state.channel_users.values():
             users.pop(nick_lower, None)
@@ -441,6 +506,16 @@ class IrcClient:
         new_nick = msg.trailing or (msg.params[0] if msg.params else "")
         if not old_nick or not new_nick:
             return
+
+        self._fire_hook(
+            event='NICK',
+            nick=old_nick,
+            ident=msg.ident,
+            host=msg.host,
+            target=new_nick,
+            raw=msg.raw,
+        )
+
         if old_nick == self.state.current_nick:
             self.state.previous_nick = old_nick
             self.state.current_nick = new_nick
@@ -458,17 +533,29 @@ class IrcClient:
         if len(msg.params) < 2:
             return
         channel = msg.params[0].lower()
-        target = msg.params[1].lower()
+        target = msg.params[1]
+        reason = msg.trailing or ""
         users = self.state.channel_users.get(channel)
         if users:
-            users.pop(target, None)
-        if target == (self.state.current_nick or "").lower():
+            users.pop(target.lower(), None)
+        if target.lower() == (self.state.current_nick or "").lower():
             self.state.channels.pop(channel, None)
             self.state.channel_users.pop(channel, None)
 
+        self._fire_hook(
+            event='KICK',
+            channel=channel,
+            nick=msg.nick,
+            ident=msg.ident,
+            host=msg.host,
+            target=target,
+            text=reason,
+            raw=msg.raw,
+        )
+
     def _handle_mode(self, msg: IrcMessage) -> None:
-        """Handle MODE (only track +/-o/v for now)."""
-        if len(msg.params) < 3:
+        """Handle MODE (track +/-o/v/h/a/q and fire OP/DEOP/VOICE/DEVOICE hooks)."""
+        if len(msg.params) < 2:
             return
         channel = msg.params[0].lower()
         if not channel.startswith('#'):
@@ -478,26 +565,82 @@ class IrcClient:
         users = self.state.channel_users.setdefault(channel, {})
         idx = 0
         adding = True
+        mode_chars_seen = []
         for c in modes:
             if c == '+':
                 adding = True
+                mode_chars_seen.append('+')
                 continue
             elif c == '-':
                 adding = False
+                mode_chars_seen.append('-')
                 continue
+            mode_chars_seen.append(c)
             if c in ('o', 'v', 'h', 'a', 'q') and idx < len(args):
-                target = args[idx].lower()
+                target = args[idx]
+                target_lower = target.lower()
                 idx += 1
+                old_prefix = users.get(target_lower, '')
+                new_prefix = old_prefix
                 if c == 'o':
-                    users[target] = '@' if adding else ''
+                    new_prefix = '@' if adding else new_prefix.replace('@', '')
+                    hook_event = 'OP' if adding else 'DEOP'
                 elif c == 'v':
-                    users[target] = '+' if adding else ''
+                    new_prefix = '+' if adding else new_prefix.replace('+', '')
+                    hook_event = 'VOICE' if adding else 'DEVOICE'
                 elif c == 'h':
-                    users[target] = '%' if adding else ''
+                    new_prefix = '%' if adding else new_prefix.replace('%', '')
+                    hook_event = 'HOP' if adding else 'DEHOP'
                 elif c == 'a':
-                    users[target] = '&' if adding else ''
+                    new_prefix = '&' if adding else new_prefix.replace('&', '')
+                    hook_event = 'ADMIN' if adding else 'DEADMIN'
                 elif c == 'q':
-                    users[target] = '~' if adding else ''
+                    new_prefix = '~' if adding else new_prefix.replace('~', '')
+                    hook_event = 'OWNER' if adding else 'DEOWNER'
+                users[target_lower] = new_prefix
+
+                mode_str = ''.join(mode_chars_seen)
+                self._fire_hook(
+                    event=hook_event,
+                    channel=channel,
+                    nick=msg.nick,
+                    ident=msg.ident,
+                    host=msg.host,
+                    target=target,
+                    mode=mode_str,
+                    raw=msg.raw,
+                )
+                mode_chars_seen = [mode_chars_seen[-1]] if mode_chars_seen and mode_chars_seen[-1] in '+-' else []
+
+        # Also fire a generic MODE hook for other mode changes (b, e, I, t, n, etc.)
+        self._fire_hook(
+            event='MODE',
+            channel=channel,
+            nick=msg.nick,
+            ident=msg.ident,
+            host=msg.host,
+            target=channel,
+            text=modes,
+            mode=modes,
+            raw=msg.raw,
+        )
+
+    def _handle_topic(self, msg: IrcMessage) -> None:
+        """Handle TOPIC changes from IRC server."""
+        if len(msg.params) < 1:
+            return
+        channel = msg.params[0]
+        topic = msg.trailing or ""
+        self._fire_hook(
+            event='TOPIC',
+            channel=channel,
+            nick=msg.nick,
+            ident=msg.ident,
+            host=msg.host,
+            target=channel,
+            text=topic,
+            raw=msg.raw,
+        )
 
     def _channel_from_numeric(self, msg: IrcMessage, pos: int) -> Optional[str]:
         """Extract channel from a numeric reply safely."""
@@ -596,11 +739,26 @@ class IrcClient:
     def _on_connected(self) -> None:
         """Called when successfully connected."""
         print(f"[IRC] {self.config.name}: Connected")
+        self._fire_hook(
+            event='CONNECT',
+
+            target=self.config.name,
+            text=self.state.current_nick,
+        )
         for callback in self._on_connect:
             try:
                 callback()
             except Exception as e:
                 print(f"[ERROR] Connect callback: {e}")
+
+    def _on_disconnected(self) -> None:
+        """Called when the upstream connection drops."""
+        self._fire_hook(
+            event='DISCONNECT',
+
+            target=self.config.name,
+            text=self.state.current_nick,
+        )
     
     # Public API
     
@@ -621,12 +779,14 @@ class IrcClient:
         """Send PRIVMSG."""
         self._send(f"PRIVMSG {target} :{message}")
         # Also buffer our own messages
-        self.buffer.add_message(
-            network=self.config.name,
-            target=target,
-            message=f"<{self.state.current_nick}> {message}",
-            msg_type="PRIVMSG"
-        )
+        if self.buffer:
+            self.buffer.add_message(
+                network=self.config.name,
+
+                target=target,
+                message=f"<{self.state.current_nick}> {message}",
+                msg_type="PRIVMSG"
+            )
     
     def send_action(self, target: str, action: str) -> None:
         """Send CTCP ACTION."""
@@ -727,6 +887,34 @@ class IrcClient:
         """Add message callback."""
         self._on_message.append(callback)
 
+    def _fire_hook(self, event: str, server: Optional[str] = None, channel: Optional[str] = None,
+                   nick: Optional[str] = None, ident: Optional[str] = None,
+                   host: Optional[str] = None, target: Optional[str] = None,
+                   text: Optional[str] = None, mode: Optional[str] = None,
+                   raw: Optional[str] = None) -> None:
+        """Fire an external hook if a hook manager is attached."""
+        if not self.hook_manager:
+            return
+        # Ensure the hook can send back to IRC
+        if not self.hook_manager.send_callback:
+            # Use the rate-limited upstream send - safe from background threads
+            self.hook_manager.send_callback = self._send
+        from shared.hook_manager import HookEvent
+        self.hook_manager.run(HookEvent(
+            network=self.config.name,
+            server=server or self.config.host or '',
+            bot_nick=self.state.current_nick or self.config.nick or '',
+            event=event,
+            channel=channel,
+            nick=nick,
+            ident=ident,
+            host=host,
+            target=target,
+            text=text,
+            mode=mode,
+            raw=raw,
+        ))
+
     def get_stats(self) -> dict:
         """Get client statistics."""
         stats = self.connection.get_stats()
@@ -745,9 +933,13 @@ class IrcClient:
         traffic received while the user is detached can be replayed on attach.
         Per-channel/query copies are kept as well for targeted playback.
         """
+        if not self.buffer:
+            return
+
         # Global network buffer for full replay
         self.buffer.add_message(
             network=self.config.name,
+
             target="*",
             message=raw_line,
             msg_type=msg_type,
@@ -763,6 +955,7 @@ class IrcClient:
         if target and target.startswith('#'):
             self.buffer.add_message(
                 network=self.config.name,
+
                 target=target,
                 message=raw_line,
                 msg_type=msg_type,

@@ -190,6 +190,78 @@ Notes:
 - Auto-op is also checked when a NAMES or WHO reply fills in a user's hostmask (e.g. during the BNC's own channel join or a client-requested `/names`).
 - The BNC does not send extra WHO requests for auto-op; it only uses hostmasks already available from normal IRC traffic.
 
+## Hooks
+
+The BNC can run external scripts when certain IRC events happen. Hook files live in the `hooks` directory (or `$BNC_DATA_DIR/hooks` if set) and are discovered at runtime. They do not require a restart.
+
+- Every supported event has a dedicated hook: `PRIVMSG`, `NOTICE`, `JOIN`, `PART`, `KICK`, `MODE`, `OP`, `DEOP`, `VOICE`, `DEVOICE`, `BAN`, `UNBAN`, `TOPIC`, `QUIT`, `NICK`, `CONNECT`, `DISCONNECT`.
+- Hooks receive data through environment variables and positional arguments:
+
+  | Var | Arg | Meaning |
+  |-----|-----|---------|
+  | `IRC_NETWORK` | `$1` | network name (e.g. `libera`)
+  | `IRC_SERVER` | `$2` | IRC server host (e.g. `irc.libera.chat`)
+  | `IRC_EVENT` | — | event name |
+  | `IRC_CHANNEL` | `$3` | channel when relevant |
+  | `IRC_NICK` | `$4` | nick that triggered the event |
+  | `IRC_IDENT` | — | ident of the user |
+  | `IRC_HOST` | — | host of the user |
+  | `IRC_TARGET` | `$5` | target (kicked nick, new nick, etc.) |
+  | `IRC_TEXT` | `$6` | message / topic / reason |
+  | `IRC_MODE` | — | mode string (e.g. `+o`) |
+  | `IRC_RAW` | — | full raw IRC line |
+
+- Every requested event fires hooks in priority order per hook directory:
+  - Channel-specific: `grandekos.com_JOIN.hook` (or `#channel_PRIVMSG.hook`, `#` stripped for filename safety)
+  - Network-specific: `libera_PRIVMSG.hook`
+  - Global: `PRIVMSG.hook`
+- `IRC_BOT_NICK` is also exported (the BNC's current nick on that network). Mode sub-events `HOP`/`DEHOP`, `ADMIN`/`DEADMIN`, `OWNER`/`DEOWNER` fire alongside the generic `MODE` hook when `+h/-h`, `+a/-a`, `+q/-q` are seen.
+
+Hook resolution searches `$BNC_DATA_DIR/hooks` first, then the bundled `hooks/` directory as a fallback.
+
+Make the file executable (`chmod +x hooks/*.hook`).
+
+Example `hooks/PRIVMSG.hook` — just logging:
+
+```bash
+#!/bin/bash
+# $1=network $2=event $3=channel $4=nick $5=target $6=text
+echo "On PRIVMSG $IRC_CHANNEL from $IRC_NICK: $IRC_TEXT on $IRC_SERVER" >> /tmp/bnc.log
+```
+
+Example `hooks/libera_JOIN.hook` — logging plus a welcome:
+
+```bash
+#!/bin/bash
+echo "$IRC_NICK joined $IRC_CHANNEL on $IRC_NETWORK" >> /tmp/bnc.log
+```
+
+### Sending from a hook to IRC
+
+Hooks can send messages back to the IRC server/channel by **echoing IRC commands to stdout**. Any stdout line whose first word is a supported IRC command is forwarded upstream (rate-limited); other lines are just logged.
+
+Supported send prefixes (case-insensitive): `PRIVMSG`, `NOTICE`, `MODE`, `KICK`, `TOPIC`, `INVITE`, `JOIN`, `PART`, `QUIT`, `NICK`, `AWAY`, `WHO`, `WHOIS`, `LIST`, `NAMES`, `RAW` — use `RAW <line>` to send arbitrary raw IRC verbatim.
+
+```bash
+#!/bin/bash
+# Reply in-channel and DM the sender
+echo "PRIVMSG $IRC_CHANNEL :Hello $IRC_NICK from hook!"
+echo "NOTICE $IRC_NICK :Got your message on $IRC_CHANNEL"
+# Auto-voice, op, kick, etc.
+echo "MODE $IRC_CHANNEL +v $IRC_NICK"
+echo "KICK $IRC_CHANNEL spammer :No spam here"
+# Arbitrary raw command
+echo "RAW WHOIS $IRC_NICK"
+# This is just logged, not sent
+echo "some diagnostic text"
+```
+
+See `hooks/example_PRIVMSG.hook`, `hooks/example_OP.hook`, `hooks/grandekos.com_JOIN.hook` for starter templates.
+
+Supported events: `PRIVMSG`, `NOTICE`, `JOIN`, `PART`, `QUIT`, `NICK`, `KICK`, `MODE`, `OP`, `DEOP`, `VOICE`, `DEVOICE`, `BAN`, `UNBAN`, `TOPIC`, `CONNECT`, `DISCONNECT` (plus `HOP`/`DEHOP`, `ADMIN`/`DEADMIN`, `OWNER`/`DEOWNER` derived from MODE).
+
+Hooks run in background daemon threads with a 30s timeout; a non-zero exit or stderr is logged.
+
 ## Web Dashboard
 
 Access at `http://localhost:8080`

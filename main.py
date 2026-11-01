@@ -12,6 +12,7 @@ import argparse
 
 from config import Config, IrcNetworkConfig, BncServerConfig
 from shared import BufferManager, UserDatabase, PasswordHasher, UserAccount
+from shared.hook_manager import HookManager
 from client import IrcClient
 from server import BncServer
 
@@ -93,9 +94,15 @@ class IrcBnc:
                 print(f"[Setup] {name}: auto-join channels synced to {net_config.channels}")
 
         # Start IRC clients
+        project_hooks_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hooks')
+        hook_manager = HookManager(
+            os.path.join(self.config.data_dir, 'hooks'),
+            extra_hooks_dirs=[project_hooks_dir],
+        )
         for name, net_config in self.config.networks.items():
             print(f"\n[Setup] Creating IRC client for {name}...")
             client = IrcClient(net_config, self.buffer_manager)
+            client.hook_manager = hook_manager
             client.start()
             self.irc_clients[name] = client
 
@@ -197,7 +204,7 @@ def main():
         default='config.json',
         help='Path to config file (default: config.json)'
     )
-    parser.add_argument('--version', action='version', version='IRC BNC 1.1.1')
+    parser.add_argument('--version', action='version', version='IRC BNC 1.2.0')
     args = parser.parse_args()
     
     bnc = IrcBnc()
