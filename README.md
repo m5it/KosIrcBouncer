@@ -13,6 +13,7 @@ A complete IRC bouncer with client-server architecture. Connect your IRC client 
 - **SSL/TLS Support**: Encrypted connections to IRC and BNC
 - **Authentication**: Secure user management with PBKDF2-hashed passwords
 - **Admin Commands**: Full control via `/BNC` commands
+- **Hooks**: External scripts on IRC events (PRIVMSG, JOIN, PART, KICK, MODE/OP, TOPIC, etc.) with ability to send messages back to IRC — see `## Hooks`
 
 ## Architecture
 
