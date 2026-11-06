@@ -369,4 +369,6 @@ Use the `/BNC STATUS` command to see your connection details including the addre
 
 ## License
 
-Copyright 2026 Blaz Kos — Modified Apache License 2.0 with additional terms (notification, payment for commercial use, audit rights, termination, governing law Canary Islands / consumer fallback Slovenia, mediation) — see `LICENSE` file.
+Copyright 2026 Blaz Kos — Modified Apache License 2.0 — see `LICENSE` file.
+
+License available by request from `w4d4f4k@gmail.com`. Additional terms apply: notification and payment for commercial use (30 days), audit rights, termination for non-compliance, governing law Canary Islands, Spain (Slovenian consumer fallback), mediation for disputes.
