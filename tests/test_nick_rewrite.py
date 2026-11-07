@@ -128,6 +128,7 @@ def test_buffer_privmsg_rewritten():
 
     session, sock = make_session(client, "t3ch")
     session.buffer_manager = bm
+    session.running = True
     session._send_buffer_playback("testnet")
 
     output = "\n".join(sock.sent)

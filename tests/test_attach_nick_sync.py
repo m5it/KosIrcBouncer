@@ -100,10 +100,12 @@ def test_nick_sync_and_join_replay():
     # detach first and then see the client as disconnected.
     session.current_network = None
     session.selected_client = None
+    session.running = True
 
-    # Simulate attach
+    # Simulate attach - replay is now async, wait for it
     session._attach_to_network("libera")
-
+    import time
+    time.sleep(1.2)
     output = "\n".join(sock.sent)
     print(output)
 

@@ -10,6 +10,7 @@ from typing import Optional, List, Callable, Dict
 from datetime import datetime
 
 from shared import IrcMessage, UserConnection, UserDatabase, PasswordHasher
+from shared.logutil import dlog
 from client import IrcClient
 
 
@@ -66,7 +67,7 @@ class UserSession(threading.Thread):
     def run(self) -> None:
         """Main session loop."""
         self.running = True
-        print(f"[BNC] Session started for {self.addr}")
+        dlog("[BNC] Session started for %s", self.addr)
         
         try:
             self._send_welcome()
@@ -104,7 +105,7 @@ class UserSession(threading.Thread):
         if not line:
             return
         
-        print(f"[BNC] <- {self.addr}: {line[:100]}")
+        dlog("[BNC] <- %s: %s", self.addr, line[:100])
         
         # Parse command
         parts = line.split()
@@ -326,69 +327,78 @@ class UserSession(threading.Thread):
             for line in client.state.registration_burst:
                 self._send(self._rewrite_replayed_line(line, client))
 
-            # Play buffer
-            self._send_buffer_playback(network_name)
+            # Do the heavier channel replay + buffer playback in the
+            # background so ping/pong and nick changes are not blocked even
+            # when 10+ channels were buffered for days.
+            def _replay():
+                self._send_buffer_playback(network_name)
+                if not self.running or self.selected_client is not client:
+                    return
 
-            # Re-join channels the user had previously saved, plus channels the
-            # upstream client is already in.
-            saved = self._get_saved_channels(network_name)
-            irc_channels = set(client.get_channel_list())
-            all_channels = irc_channels | saved
+                # Re-join channels the user had previously saved, plus channels the
+                # upstream client is already in.
+                saved = self._get_saved_channels(network_name)
+                irc_channels = set(client.get_channel_list())
+                all_channels = irc_channels | saved
 
-            # Try to determine our real hostmask. Prefer the host field from a
-            # WHO reply for our own nick, otherwise fall back to the cached
-            # hostmask or a generic placeholder.
-            own_nick_lower = (client.state.current_nick or "").lower()
-            hostmask = client.state.hostmask
-            if not hostmask:
-                for channel in all_channels:
-                    for line in client.state.channel_who.get(channel.lower(), []):
-                        msg = IrcMessage.parse(line)
-                        # WHO reply: client channel ident host server nick status :hops realname
-                        if len(msg.params) >= 7 and msg.params[5].lower() == own_nick_lower:
-                            ident = msg.params[2]
-                            host = msg.params[3]
-                            hostmask = f"{client.state.current_nick}!{ident}@{host}"
-                            client.state.hostmask = hostmask
+                # Try to determine our real hostmask. Prefer the host field from a
+                # WHO reply for our own nick, otherwise fall back to the cached
+                # hostmask or a generic placeholder.
+                own_nick_lower = (client.state.current_nick or "").lower()
+                hostmask = client.state.hostmask
+                if not hostmask:
+                    for channel in all_channels:
+                        for line in client.state.channel_who.get(channel.lower(), []):
+                            msg = IrcMessage.parse(line)
+                            # WHO reply: client channel ident host server nick status :hops realname
+                            if len(msg.params) >= 7 and msg.params[5].lower() == own_nick_lower:
+                                ident = msg.params[2]
+                                host = msg.params[3]
+                                hostmask = f"{client.state.current_nick}!{ident}@{host}"
+                                client.state.hostmask = hostmask
+                                break
+                        if hostmask:
                             break
-                    if hostmask:
-                        break
-            if not hostmask:
-                hostmask = f"{client.state.current_nick}!user@host"
+                if not hostmask:
+                    hostmask = f"{client.state.current_nick}!user@host"
 
-            for channel in sorted(all_channels):
-                channel_lower = channel.lower()
-                if channel in irc_channels:
-                    # Already joined upstream: fake the JOIN so HexChat shows the
-                    # channel immediately and replay cached metadata.
-                    self._send(f":{hostmask} JOIN {channel}")
+                for channel in sorted(all_channels):
+                    if not self.running or self.selected_client is not client:
+                        return
+                    channel_lower = channel.lower()
+                    if channel in irc_channels:
+                        # Already joined upstream: fake the JOIN so HexChat shows the
+                        # channel immediately and replay cached metadata.
+                        self._send(f":{hostmask} JOIN {channel}")
 
-                    # Replay channel metadata: modes, names, and WHO replies.
-                    # This is exactly what HexChat expects after a JOIN.
-                    for line in client.state.channel_modes.get(channel_lower, []):
-                        self._send(self._rewrite_replayed_line(line, client))
-                        time.sleep(0.05)
+                        # Replay channel metadata: modes, names, and WHO replies.
+                        # This is exactly what HexChat expects after a JOIN.
+                        for line in client.state.channel_modes.get(channel_lower, []):
+                            self._send(self._rewrite_replayed_line(line, client))
+                            time.sleep(0.05)
 
-                    # Send a fresh, live 353/366 names list for this channel.
-                    for line in client.build_names_list(channel):
-                        self._send(line)
-                        time.sleep(0.05)
+                        # Send a fresh, live 353/366 names list for this channel.
+                        for line in client.build_names_list(channel):
+                            self._send(line)
+                            time.sleep(0.05)
 
-                    for line in client.state.channel_who.get(channel_lower, []):
-                        self._send(self._rewrite_replayed_line(line, client))
-                        time.sleep(0.05)
+                        for line in client.state.channel_who.get(channel_lower, []):
+                            self._send(self._rewrite_replayed_line(line, client))
+                            time.sleep(0.05)
 
-                    # Run auto-op checks against currently known users in the channel.
-                    self._apply_auto_op_masks(client, network_name, channel)
-                else:
-                    # Not yet joined upstream: request the JOIN, but do NOT send
-                    # a fake JOIN to HexChat. The real upstream JOIN (or error)
-                    # will be relayed through _on_irc_message once it arrives.
-                    client.join_channel(channel)
-                    # Give the upstream throttler a moment so rapid JOINs
-                    # (for example on attach with many saved channels) do not
-                    # trigger an Excess Flood kill.
-                    time.sleep(0.4)
+                        # Run auto-op checks against currently known users in the channel.
+                        self._apply_auto_op_masks(client, network_name, channel)
+                    else:
+                        # Not yet joined upstream: request the JOIN, but do NOT send
+                        # a fake JOIN to HexChat. The real upstream JOIN (or error)
+                        # will be relayed through _on_irc_message once it arrives.
+                        client.join_channel(channel)
+                        # Give the upstream throttler a moment so rapid JOINs
+                        # (for example on attach with many saved channels) do not
+                        # trigger an Excess Flood kill.
+                        time.sleep(0.4)
+
+            threading.Thread(target=_replay, daemon=True).start()
         else:
             self._send(f":server NOTICE * :Network {network_name} not connected")
 
@@ -417,7 +427,7 @@ class UserSession(threading.Thread):
             return
         channel_lower = channel.lower()
         masks = account.get_auto_op_masks(network_name, channel)
-        print(f"[BNC] apply auto-op on re-attach for {channel} masks={masks}")
+        dlog("[BNC] apply auto-op on re-attach for %s masks=%s", channel, masks)
         if not masks:
             return
         for nick_lower, user_info in client.state.users.items():
@@ -425,13 +435,13 @@ class UserSession(threading.Thread):
             ident = user_info.get('ident')
             host = user_info.get('host')
             if not nick or not ident or not host:
-                print(f"[BNC] auto-op skip {nick_lower}: missing ident/host")
+                dlog("[BNC] auto-op skip %s: missing ident/host", nick_lower)
                 continue
             for mask in masks:
                 match = account.mask_matches(mask, nick, ident, host)
-                print(f"[BNC] auto-op check {nick}!{ident}@{host} vs {mask} = {match}")
+                dlog("[BNC] auto-op check %s!%s@%s vs %s = %s", nick, ident, host, mask, match)
                 if match:
-                    print(f"[BNC] Auto-op: sending MODE {channel} +o {nick}")
+                    dlog("[BNC] Auto-op: sending MODE %s +o %s", channel, nick)
                     client._send(f"MODE {channel} +o {nick}")
                     # Small delay between consecutive MODE commands to avoid
                     # triggering upstream excess flood on channels with many
@@ -483,6 +493,10 @@ class UserSession(threading.Thread):
 
         return line
 
+    def _is_replay_active(self) -> bool:
+        """Check if session is still attached and should continue replay."""
+        return self.running and self.selected_client is not None
+
     def _send_buffer_playback(self, network: str) -> None:
         """Send buffered messages to user since their last detach/login."""
         if not self.buffer_manager:
@@ -493,7 +507,14 @@ class UserSession(threading.Thread):
         self.last_buffer_time = datetime.now()
 
         buf = self.buffer_manager.get_buffer(network, "*")
-        entries = buf.get_since(since) if since else buf.get_last(100)
+        # Cap replay after days away to keep the session responsive.
+        # Last-detach replay can otherwise be thousands of messages.
+        raw_entries = buf.get_since(since) if since else buf.get_last(100)
+        if raw_entries and len(raw_entries) > 50:
+            self._send(f":server NOTICE * :Buffer has {len(raw_entries)} messages, showing last 50")
+            entries = raw_entries[-50:]
+        else:
+            entries = raw_entries
 
         if not entries:
             self._send(f":server NOTICE * :No buffered messages")
@@ -501,7 +522,11 @@ class UserSession(threading.Thread):
 
         self._send(f":server NOTICE * :Replay {len(entries)} buffered message(s)")
         client = self.selected_client
+        if not self._is_replay_active():
+            return
         for entry in entries:
+            if not self._is_replay_active():
+                return
             line = self._rewrite_replayed_line(entry.message, client)
             self._send(line)
     
@@ -812,7 +837,7 @@ class UserSession(threading.Thread):
         try:
             self.conn.send(message.encode('utf-8'))
             self.messages_sent += 1
-            print(f"[BNC] -> {self.addr}: {message[:100].strip()}")
+            dlog("[BNC] -> %s: %s", self.addr, message[:100].strip())
         except Exception as e:
             print(f"[BNC] Send error: {e}")
             self.running = False

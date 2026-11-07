@@ -205,7 +205,11 @@ def main():
         help='Path to config file (default: config.json)'
     )
     parser.add_argument('--version', action='version', version='IRC BNC 1.2.0')
+    parser.add_argument('--debug', action='store_true', help='Enable verbose debug logging')
     args = parser.parse_args()
+
+    from shared.logutil import set_debug
+    set_debug(args.debug)
     
     bnc = IrcBnc()
     

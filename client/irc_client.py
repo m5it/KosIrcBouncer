@@ -10,10 +10,13 @@ from typing import Optional, List, Callable, Dict, Set
 from datetime import datetime
 from dataclasses import dataclass, field
 
+from shared.logutil import dlog
+
 from config import IrcNetworkConfig
 from shared import IrcMessage, ChannelMessage
 from client.connection import IrcConnection
 from shared.hook_manager import HookManager
+from shared.logutil import dlog
 
 
 @dataclass
@@ -126,7 +129,7 @@ class IrcClient:
                     self._max_reconnect_delay
                 )
                 self._reconnect_attempts += 1
-                print(f"[IRC] Reconnecting in {delay}s... (attempt {self._reconnect_attempts})")
+                dlog("[IRC] Reconnecting in %ss... (attempt %s)", delay, self._reconnect_attempts)
                 time.sleep(delay)
     
     def _connect_and_run(self) -> bool:
@@ -146,7 +149,7 @@ class IrcClient:
         self._last_sent_ping = 0.0
 
         # Connect
-        print(f"[IRC] Connecting to {self.config.host}:{self.config.port}...")
+        dlog("[IRC] Connecting to %s:%s...", self.config.host, self.config.port)
         if not self.connection.connect():
             return False
 
@@ -170,7 +173,7 @@ class IrcClient:
                 return True
 
             if time.time() - start > timeout:
-                print("[IRC] Registration timeout")
+                dlog("[IRC] Registration timeout")
                 break
             time.sleep(0.1)
 
@@ -215,7 +218,7 @@ class IrcClient:
             try:
                 callback(msg)
             except Exception as e:
-                print(f"[ERROR] Message callback: {e}")
+                dlog("[ERROR] Message callback: %s", e)
     
     def _handle_sasl(self, msg: IrcMessage) -> bool:
         """Handle SASL authentication."""
@@ -257,7 +260,7 @@ class IrcClient:
             # Server name is the prefix of the welcome message.
             if msg.prefix:
                 self.state.server_name = msg.prefix
-            print(f"[IRC] Connected as {self.state.current_nick}")
+            dlog("[IRC] Connected as %s", self.state.current_nick)
 
         elif code == 396:  # RPL_HOSTHIDDEN / visible host
             if len(msg.params) >= 3:
@@ -347,7 +350,7 @@ class IrcClient:
         # If we haven't seen any traffic for 180 seconds, consider the
         # connection dead and force a reconnect.
         if now - self.connection.last_activity > 180:
-            print("[IRC] Keepalive timeout, forcing reconnect")
+            dlog("[IRC] Keepalive timeout, forcing reconnect")
             self.connection.disconnect()
     
     def _handle_privmsg(self, msg: IrcMessage) -> None:
@@ -462,7 +465,7 @@ class IrcClient:
             self.state.channel_who[channel_lower] = []
             self.state.channel_modes[channel_lower] = []
             self.state.channel_users[channel_lower] = {}
-            print(f"[IRC] Joined {channel}")
+            dlog("[IRC] Joined %s", channel)
         else:
             self.state.channel_users.setdefault(channel_lower, {})[nick.lower()] = ""
             # Auto-op immediately if the joining user's hostmask matches.
@@ -763,7 +766,7 @@ class IrcClient:
 
     def _on_connected(self) -> None:
         """Called when successfully connected."""
-        print(f"[IRC] {self.config.name}: Connected")
+        dlog("[IRC] %s: Connected", self.config.name)
         self._fire_hook(
             event='CONNECT',
 
@@ -774,7 +777,7 @@ class IrcClient:
             try:
                 callback()
             except Exception as e:
-                print(f"[ERROR] Connect callback: {e}")
+                dlog("[ERROR] Connect callback: %s", e)
 
     def _on_disconnected(self) -> None:
         """Called when the upstream connection drops."""
@@ -868,14 +871,14 @@ class IrcClient:
         channel_lower = channel.lower()
         with self._auto_op_lock:
             masks = list(self._auto_op_masks.get(channel_lower, set()))
-        print(f"[IRC] auto-op check: {nick}!{ident}@{host} on {channel} masks={masks}")
+        dlog("[IRC] auto-op check: %s!%s@%s on %s masks=%s", nick, ident, host, channel, masks)
         if not masks:
             return
         for mask in masks:
             match = UserAccount.mask_matches(mask, nick, ident, host)
-            print(f"[IRC] auto-op mask={mask} match={match}")
+            dlog("[IRC] auto-op mask=%s match=%s", mask, match)
             if match:
-                print(f"[IRC] Auto-op: sending MODE {channel} +o {nick}")
+                dlog("[IRC] Auto-op: sending MODE %s +o %s", channel, nick)
                 self._send(f"MODE {channel} +o {nick}")
                 # Let the upstream rate limiter/throttler catch up.
                 time.sleep(0.35)
