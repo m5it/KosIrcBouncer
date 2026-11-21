@@ -104,18 +104,19 @@ def test_nick_change_survives_reconnect():
 
     client = IrcClient(net, None)
 
-    # User changes nick
+    # User changes nick - config/nick updates immediately, current waits for server echo
     client.change_nick("NewNick")
 
     assert client.state.nick == "NewNick"
-    assert client.state.current_nick == "NewNick"
     assert client.config.nick == "NewNick"
+    assert client.state.current_nick == "OldNick", "current_nick should stay old until server confirms"
 
     # Simulate server confirming the nick change
     from shared.message import IrcMessage
     msg = IrcMessage.parse(":OldNick!user@host NICK :NewNick")
     client._handle_nick(msg)
 
+    assert client.state.current_nick == "NewNick"
     assert client.config.nick == "NewNick"
 
     # Simulate a reconnect: _connect_and_run resets state from config

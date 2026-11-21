@@ -480,9 +480,19 @@ class UserSession(threading.Thread):
 
             return msg.to_raw()
 
+        # NICK messages must never be rewritten: the prefix is the old nick
+        # and the trailing is the new nick. Rewriting would make the client
+        # see :new!... NICK :new which looks like no change.
+        if msg.command == 'NICK':
+            return line
+
         # Non-numeric lines (PRIVMSG, NOTICE, JOIN, PART, etc.) may contain the
         # upstream's previous nick in the prefix. Replace it with the current
         # nick so the downstream client sees a consistent nickname.
+        # This is only needed for buffered replay; live traffic from other
+        # users should not be rewritten if they happen to have taken our old
+        # nick, but that collision is rare and the rewrite keeps history
+        # consistent after a nick change.
         prev = client.state.previous_nick
         curr = client.state.current_nick
         if prev and curr and prev != curr:
@@ -532,11 +542,24 @@ class UserSession(threading.Thread):
     
     def _on_irc_message(self, msg: IrcMessage) -> None:
         """Handle message from IRC network."""
-        # Relay to user, rewriting nick references if the user's nick has
-        # changed since the line was captured.
         if msg.raw:
-            line = self._rewrite_replayed_line(msg.raw, self.selected_client)
-            self._send(line)
+            # Do not rewrite live NICK lines – the old->new transition must be
+            # preserved for the IRC client to update its nick.  For other
+            # live traffic we also avoid the generic prefix rewrite which is
+            # only intended for buffered replay (otherwise another user who
+            # happens to have taken our old nick would be mis-attributed).
+            if msg.command == 'NICK':
+                self._send(msg.raw)
+                return
+            # Numeric replies may still contain the old client nick as
+            # target (e.g. 353/352) when they were generated before the nick
+            # change – rewrite those.  Other commands are passed through
+            # verbatim.
+            if msg.command.isdigit():
+                line = self._rewrite_replayed_line(msg.raw, self.selected_client)
+                self._send(line)
+            else:
+                self._send(msg.raw)
     
     def _handle_ping(self, params: List[str], line: str) -> None:
         """Handle PING from user."""
@@ -662,14 +685,22 @@ class UserSession(threading.Thread):
             return
         channel = params[0].lstrip(':').lower()
 
-        # Serve cached names if available, otherwise pass through to IRC.
-        if self.selected_client and channel in self.selected_client.state.channel_names:
-            for cached_line in self.selected_client.state.channel_names[channel]:
-                self._send(self._rewrite_replayed_line(cached_line, self.selected_client))
-            return
-
+        # Serve cached names if we have a non-empty burst, otherwise
+        # forward to the IRC server for a live reply.  An empty list
+        # means we just cleared the cache after a JOIN and have not yet
+        # received the server's 353/366 – forwarding is required.
         if self.selected_client:
+            cached = self.selected_client.state.channel_names.get(channel, [])
+            if cached:
+                for cached_line in cached:
+                    self._send(self._rewrite_replayed_line(cached_line, self.selected_client))
+                return
+            # No cached burst: ask the IRC server.
             self.selected_client._send(line)
+            return
+        # No upstream client: send empty reply so HexChat does not hang
+        self._send(f":server 353 {self.nick} = {params[0].lstrip(':')} :")
+        self._send(f":server 366 {self.nick} {params[0].lstrip(':')} :End of /NAMES list.")
 
     def _handle_bnc_command(self, params: List[str], line: str) -> None:
         """Handle BNC control commands."""

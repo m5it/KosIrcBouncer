@@ -266,10 +266,18 @@ class IrcClient:
             if len(msg.params) >= 3:
                 self.state.hostmask = msg.params[1]
 
-        elif code == 433:  # ERR_NICKNAMEINUSE
-            # Try alternative nick
-            self.state.current_nick = f"{self.state.nick}_"
-            self._send(f"NICK {self.state.current_nick}")
+        elif code in (433, 432):  # ERR_NICKNAMEINUSE / ERR_ERRONEOUSNICKNAME
+            # If we have not yet registered, try the nick from the numeric
+            # (params[1] is the rejected nick) with a trailing underscore.
+            # If already registered (user /nick), just keep current_nick and
+            # let the client see the error via relay.
+            if not self.state.registered:
+                failed = msg.params[1] if len(msg.params) > 1 else self.state.nick
+                self.state.nick = f"{failed}_"
+                self.state.current_nick = self.state.nick
+                self.config.nick = self.state.nick
+                self._remember_bot_nick(self.state.current_nick)
+                self._send(f"NICK {self.state.current_nick}")
 
         elif code == 353:  # RPL_NAMREPLY
             self._handle_namreply(msg)
@@ -538,7 +546,10 @@ class IrcClient:
                 raw=msg.raw,
             )
 
-        if old_nick == self.state.current_nick:
+        # Update our own nick tracking.  Compare case-insensitively because
+        # the server may echo with different casing; the handler must work
+        # whether change_nick was optimistic or not.
+        if old_nick.lower() == (self.state.current_nick or "").lower():
             self.state.previous_nick = old_nick
             self.state.current_nick = new_nick
             # Keep the configured nick in sync so reconnects use the new nick.
@@ -828,14 +839,13 @@ class IrcClient:
     def change_nick(self, new_nick: str) -> None:
         """Change nickname.
 
-        Updates the in-memory config so that reconnects keep the same nickname
-        the user set.
+        The BNC remembers the desired nick in the config so reconnects keep
+        it, and sends the IRC NICK command upstream.  The actual
+        current_nick/previous_nick transition is applied when the server
+        echoes the NICK (see _handle_nick) so that failed nick changes
+        (433/432) do not desync state.
         """
-        old_nick = self.state.current_nick
-        if old_nick and old_nick != new_nick:
-            self.state.previous_nick = old_nick
         self.state.nick = new_nick
-        self.state.current_nick = new_nick
         self.config.nick = new_nick
         self._remember_bot_nick(new_nick)
         self._send(f"NICK {new_nick}")
